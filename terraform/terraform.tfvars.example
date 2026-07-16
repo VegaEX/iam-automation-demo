@@ -8,3 +8,9 @@ okta_api_token = "00xAbCdEfGhIjKlMnOpQrStUvWxYz-example-token"
 
 aws_region  = "us-east-1"
 environment = "dev"
+
+github_repo = "acme-corp/iam-automation-demo"
+
+# Leave empty until the provisioning Lambda's and CI's Okta API tokens have
+# actually been used and their actor IDs observed in the Okta System Log.
+known_automation_actor_ids = ""

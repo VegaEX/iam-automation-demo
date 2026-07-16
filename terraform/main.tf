@@ -54,5 +54,26 @@ module "okta_policies" {
   admin_group_id = module.okta_groups.group_ids["ops-base"]
 }
 
-# TODO: wire up modules/lambda_provisioning and modules/api_gateway once the
-# Lambda source under lambda/ is implemented.
+module "lambda_provisioning" {
+  source = "./modules/lambda_provisioning"
+
+  okta_org_name = var.okta_org_name
+  okta_base_url = var.okta_base_url
+}
+
+module "api_gateway" {
+  source = "./modules/api_gateway"
+
+  lambda_function_name = module.lambda_provisioning.function_name
+  lambda_invoke_arn    = module.lambda_provisioning.invoke_arn
+}
+
+module "okta_drift_auditor" {
+  source = "./modules/okta_drift_auditor"
+
+  okta_org_name              = var.okta_org_name
+  okta_base_url              = var.okta_base_url
+  github_repo                = var.github_repo
+  known_automation_actor_ids = var.known_automation_actor_ids
+  managed_resource_ids_json  = file("${path.module}/../lambda-drift-auditor/managed_resources.json")
+}

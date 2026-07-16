@@ -27,3 +27,14 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+variable "github_repo" {
+  description = "owner/repo (e.g. \"jangus/iam-automation-demo\") that the okta-drift-auditor Lambda opens \"Manual Okta change detected\" issues against."
+  type        = string
+}
+
+variable "known_automation_actor_ids" {
+  description = "Comma-separated Okta actor IDs (API token IDs) the drift auditor treats as known automation. Starts empty - these IDs are only knowable once the provisioning Lambda's and CI's Okta tokens have actually been used and observed in the Okta System Log, so fill this in after first deploy."
+  type        = string
+  default     = ""
+}

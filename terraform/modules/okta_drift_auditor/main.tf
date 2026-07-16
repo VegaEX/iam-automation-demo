@@ -37,22 +37,25 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
   })
 }
 
-# Lets the function read its own Okta API token from SSM at invocation time
-# so it can call the Okta API - the token's value never appears in a
-# Terraform-managed environment variable or in Terraform state, only its
-# parameter name does (set below).
-resource "aws_iam_role_policy" "okta_token_read" {
-  name = "${var.function_name}-okta-token-read"
+# Lets the function read the Okta API token and the GitHub PAT from SSM at
+# invocation time - neither secret's value ever appears in a Terraform-
+# managed environment variable or in Terraform state, only their parameter
+# names do (set below).
+resource "aws_iam_role_policy" "secrets_ssm_read" {
+  name = "${var.function_name}-secrets-read"
   role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "ReadOktaTokenParameter"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.okta_api_token_ssm_param_name}"
+        Sid    = "ReadSecretParameters"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter"]
+        Resource = [
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.okta_api_token_ssm_param_name}",
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_ssm_param_name}",
+        ]
       },
       {
         # SSM SecureString parameters under the default AWS-managed key are
@@ -86,11 +89,35 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
-      OKTA_ORG_NAME             = var.okta_org_name
-      OKTA_BASE_URL             = var.okta_base_url
-      OKTA_API_TOKEN_PARAM_NAME = var.okta_api_token_ssm_param_name
+      OKTA_ORG_NAME              = var.okta_org_name
+      OKTA_BASE_URL              = var.okta_base_url
+      OKTA_API_TOKEN_PARAM_NAME  = var.okta_api_token_ssm_param_name
+      GITHUB_TOKEN_PARAM_NAME    = var.github_token_ssm_param_name
+      GITHUB_REPO                = var.github_repo
+      KNOWN_AUTOMATION_ACTOR_IDS = var.known_automation_actor_ids
+      LOOKBACK_MINUTES           = tostring(var.lookback_minutes)
+      MANAGED_RESOURCE_IDS_JSON  = var.managed_resource_ids_json
     }
   }
 
   depends_on = [aws_cloudwatch_log_group.this]
+}
+
+resource "aws_cloudwatch_event_rule" "schedule" {
+  name                = "${var.function_name}-schedule"
+  description         = "Triggers ${var.function_name} to audit recent Okta System Log events."
+  schedule_expression = var.schedule_expression
+}
+
+resource "aws_cloudwatch_event_target" "lambda" {
+  rule = aws_cloudwatch_event_rule.schedule.name
+  arn  = aws_lambda_function.this.arn
+}
+
+resource "aws_lambda_permission" "eventbridge_invoke" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.this.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.schedule.arn
 }

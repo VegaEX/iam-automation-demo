@@ -1,0 +1,13 @@
+{
+  "version": "0",
+  "id": "5f8a2b3c-1234-4a5b-9c8d-7e6f5a4b3c2d",
+  "detail-type": "Scheduled Event",
+  "source": "aws.events",
+  "account": "123456789012",
+  "time": "2026-07-15T08:15:00Z",
+  "region": "us-east-1",
+  "resources": [
+    "arn:aws:events:us-east-1:123456789012:rule/okta-drift-auditor-schedule"
+  ],
+  "detail": {}
+}
