@@ -56,6 +56,7 @@ module "okta_policies" {
 
 module "lambda_provisioning" {
   source = "./modules/lambda_provisioning"
+  count  = var.enable_aws_resources ? 1 : 0
 
   okta_org_name = var.okta_org_name
   okta_base_url = var.okta_base_url
@@ -63,13 +64,15 @@ module "lambda_provisioning" {
 
 module "api_gateway" {
   source = "./modules/api_gateway"
+  count  = var.enable_aws_resources ? 1 : 0
 
-  lambda_function_name = module.lambda_provisioning.function_name
-  lambda_invoke_arn    = module.lambda_provisioning.invoke_arn
+  lambda_function_name = module.lambda_provisioning[0].function_name
+  lambda_invoke_arn    = module.lambda_provisioning[0].invoke_arn
 }
 
 module "okta_drift_auditor" {
   source = "./modules/okta_drift_auditor"
+  count  = var.enable_aws_resources ? 1 : 0
 
   okta_org_name              = var.okta_org_name
   okta_base_url              = var.okta_base_url

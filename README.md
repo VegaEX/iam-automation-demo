@@ -37,7 +37,7 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - **Done:** `okta-drift-auditor` Lambda — implemented and unit-tested (`pytest` in `lambda-drift-auditor/tests/`), including runtime SSM secret lookups (`secret_store.py`) instead of plain-text secret env vars.
 - **Done:** AWS-side Terraform — `modules/lambda_provisioning` (Lambda + execution role), `modules/api_gateway` (HTTP API, `POST /provision`), and `modules/okta_drift_auditor` (Lambda + execution role + 15-minute EventBridge schedule) are all wired into the root module and validate cleanly (`terraform validate`).
 - **In progress:** Provisioning Lambda (`lambda/`) — directory scaffolded, handler logic not yet written. The Terraform above will happily deploy it, but it won't do anything useful until that's implemented.
-- **Not yet done:** an actual `terraform apply` of the AWS resources. That needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
+- **Not yet done:** an actual `terraform apply` of the AWS resources. All three AWS modules are gated behind `enable_aws_resources` (default `false`, so the Okta-only config applies with no AWS credentials at all) — flipping it to `true` also needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
 
 ## Setup from scratch
 
@@ -55,7 +55,8 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 
 5. **Push to `main` or open a PR.** Plan runs on every PR, apply runs on merge, drift check runs daily at 08:00 UTC.
 
-6. **Lambda deployment** (`modules/lambda_provisioning`, `modules/api_gateway`, `modules/okta_drift_auditor`) needs a few things the Okta-only setup above doesn't:
+6. **Lambda deployment** (`modules/lambda_provisioning`, `modules/api_gateway`, `modules/okta_drift_auditor`) is opt-in and needs a few things the Okta-only setup above doesn't:
+   - Set `enable_aws_resources = true` in `terraform.tfvars` — it defaults to `false`, so none of these three modules are created (all gated with `count = var.enable_aws_resources ? 1 : 0`) until you flip it.
    - AWS credentials for Terraform's `aws` provider (the default credential chain — environment variables, shared config, or an IAM role — works as-is).
    - Build the deployment zips first: `lambda/build.sh` and `lambda-drift-auditor/build.sh` each install dependencies and produce the `.zip` the corresponding Terraform module points at (`filebase64sha256` on a missing zip fails `plan`, not just `apply`).
    - Create the two secrets **in SSM directly** before ever applying — Terraform only ever references their *names*, never their values, so it can't create them for you:
@@ -65,6 +66,7 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
      ```
    - Set `github_repo` (in `terraform.tfvars`) to your real `owner/repo`.
    - Leave `known_automation_actor_ids` empty on first apply — you can't know the provisioning Lambda's or CI's Okta token actor IDs until they've actually made a call that shows up in the Okta System Log. Look those IDs up afterward and set the variable so the auditor stops flagging your own automation as manual changes.
+   - The auditor's `MANAGED_RESOURCE_IDS_JSON` env var defaults to `"{}"` (no `file()` reference — Terraform Cloud's remote runners can't reach `lambda-drift-auditor/managed_resources.json` relative to the module path). With it empty, the auditor doesn't skip anything - it evaluates *every* group/policy/app-assignment event org-wide, not just Terraform-managed ones - so run `terraform output -json` after every apply and push the resulting resource IDs into the deployed Lambda's environment yourself to narrow it back down to what Terraform actually manages.
 
 ## How the drift governance loop works
 
