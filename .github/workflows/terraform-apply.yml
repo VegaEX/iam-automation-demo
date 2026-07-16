@@ -1,2 +1,36 @@
-# Placeholder: workflow triggered on push/merge to main - runs terraform apply
-# against the Terraform Cloud workspace to roll out the merged changes.
+name: Terraform Apply
+
+on:
+  push:
+    branches:
+      - main
+
+defaults:
+  run:
+    working-directory: terraform
+
+permissions:
+  contents: read
+
+env:
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  apply:
+    name: Apply
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -input=false

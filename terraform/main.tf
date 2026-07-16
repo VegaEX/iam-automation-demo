@@ -4,6 +4,7 @@ module "okta_groups" {
   groups = [
     { name = "eng-base", description = "Baseline access group for Engineering staff" },
     { name = "ops-base", description = "Baseline access group for Operations/IT staff" },
+    { name = "it-base", description = "IT department base access group" },
     { name = "all-staff", description = "Automatic membership for every active employee" },
   ]
 
