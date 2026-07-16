@@ -28,12 +28,15 @@ variable "timeout" {
   default     = 30
 }
 
+<<<<<<< HEAD
 variable "reserved_concurrent_executions" {
   description = "Blast radius cap: the maximum number of concurrent invocations this function is ever allowed, regardless of incoming traffic. Also implicitly reserves this much of the account's concurrency pool for this function alone."
   type        = number
   default     = 10
 }
 
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 variable "okta_org_name" {
   description = "Okta organization name, passed through as an environment variable."
   type        = string
@@ -50,6 +53,7 @@ variable "okta_api_token_ssm_param_name" {
   default     = "/iam-automation-demo/okta/api_token"
 }
 
+<<<<<<< HEAD
 variable "github_token_param_name" {
   description = "Name of the SSM SecureString parameter holding a GitHub PAT with issues:write, used by schema_validator.py to open an issue when an ADP payload contains unmapped fields. Same out-of-band-creation rule as the Okta token above - Terraform only references the name, never the value."
   type        = string
@@ -79,6 +83,8 @@ variable "pending_removals_param_name" {
   default     = "/iam-demo/pending-removals"
 }
 
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 variable "log_retention_days" {
   description = "CloudWatch log group retention, in days."
   type        = number

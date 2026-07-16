@@ -32,20 +32,31 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
         "logs:CreateLogStream",
         "logs:PutLogEvents",
       ]
+<<<<<<< HEAD
       # Trailing wildcard right after the function name (not just inside
       # the "*") so this one statement covers both this module's Lambda
       # functions - "${var.function_name}" and
       # "${var.function_name}-escalation-check" - without a second
       # near-duplicate policy statement.
       Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.function_name}*:*"
+=======
+      Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/aws/lambda/${var.function_name}:*"
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     }]
   })
 }
 
+<<<<<<< HEAD
 # Lets both of this module's Lambda functions read the Okta token, GitHub
 # token, and Slack webhook URL from SSM at invocation time - none of these
 # secrets' values ever appear in a Terraform-managed environment variable or
 # in Terraform state, only their parameter names do (set below).
+=======
+# Lets the function read the Okta API token and the GitHub PAT from SSM at
+# invocation time - neither secret's value ever appears in a Terraform-
+# managed environment variable or in Terraform state, only their parameter
+# names do (set below).
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 resource "aws_iam_role_policy" "secrets_ssm_read" {
   name = "${var.function_name}-secrets-read"
   role = aws_iam_role.lambda_exec.id
@@ -60,7 +71,10 @@ resource "aws_iam_role_policy" "secrets_ssm_read" {
         Resource = [
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.okta_api_token_ssm_param_name}",
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_ssm_param_name}",
+<<<<<<< HEAD
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.slack_webhook_param_name}",
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
         ]
       },
       {
@@ -84,6 +98,7 @@ resource "aws_iam_role_policy" "secrets_ssm_read" {
   })
 }
 
+<<<<<<< HEAD
 # The open-escalations list is plain state, not a secret - both functions
 # need to read *and write* it (append on escalation, rewrite on each
 # follow-up check), unlike the read-only secrets above.
@@ -122,6 +137,8 @@ resource "aws_iam_role_policy" "reported_admin_alerts_state" {
   })
 }
 
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 resource "aws_lambda_function" "this" {
   function_name    = var.function_name
   role             = aws_iam_role.lambda_exec.arn
@@ -133,6 +150,7 @@ resource "aws_lambda_function" "this" {
 
   environment {
     variables = {
+<<<<<<< HEAD
       OKTA_ORG_NAME                    = var.okta_org_name
       OKTA_BASE_URL                    = var.okta_base_url
       OKTA_API_TOKEN_PARAM_NAME        = var.okta_api_token_ssm_param_name
@@ -146,6 +164,16 @@ resource "aws_lambda_function" "this" {
       REPORTED_ADMIN_ALERTS_PARAM_NAME = var.reported_admin_alerts_param_name
       LOOKBACK_MINUTES                 = tostring(var.lookback_minutes)
       MANAGED_RESOURCE_IDS_JSON        = var.managed_resource_ids_json
+=======
+      OKTA_ORG_NAME              = var.okta_org_name
+      OKTA_BASE_URL              = var.okta_base_url
+      OKTA_API_TOKEN_PARAM_NAME  = var.okta_api_token_ssm_param_name
+      GITHUB_TOKEN_PARAM_NAME    = var.github_token_ssm_param_name
+      GITHUB_REPO                = var.github_repo
+      KNOWN_AUTOMATION_ACTOR_IDS = var.known_automation_actor_ids
+      LOOKBACK_MINUTES           = tostring(var.lookback_minutes)
+      MANAGED_RESOURCE_IDS_JSON  = var.managed_resource_ids_json
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     }
   }
 
@@ -170,6 +198,7 @@ resource "aws_lambda_permission" "eventbridge_invoke" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.schedule.arn
 }
+<<<<<<< HEAD
 
 # Second function, same zip and role, different entry point - one Lambda
 # resource can only run one handler, so check_unacknowledged_escalations
@@ -219,3 +248,5 @@ resource "aws_lambda_permission" "escalation_check_eventbridge_invoke" {
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.escalation_check_schedule.arn
 }
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

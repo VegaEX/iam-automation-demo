@@ -38,6 +38,7 @@ def classify_event(log_event):
         return "approved_hr_pattern"
 
     return "manual_review_required"
+<<<<<<< HEAD
 
 
 # Event types that can carry an admin role grant as their target. Admin
@@ -123,3 +124,5 @@ def classify_admin_privilege_event(log_event):
     if actor.get("id") in _known_automation_actor_ids():
         return "admin_grant_known_automation"
     return "admin_grant_unknown_actor"
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

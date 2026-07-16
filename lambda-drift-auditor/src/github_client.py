@@ -21,9 +21,12 @@ class GitHubClient:
         )
         response.raise_for_status()
         return response.json()
+<<<<<<< HEAD
 
     def get_issue(self, issue_number):
         url = f"https://api.github.com/repos/{self.repo}/issues/{issue_number}"
         response = requests.get(url, headers=self.headers, timeout=10)
         response.raise_for_status()
         return response.json()
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

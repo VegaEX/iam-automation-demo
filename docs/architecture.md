@@ -1,5 +1,6 @@
 # Architecture
 
+<<<<<<< HEAD
 This project has four moving parts that all touch the same Okta org from
 different angles:
 
@@ -7,15 +8,25 @@ different angles:
    events, a Lambda acts on them immediately. Termination fans out into a
    multi-app offboarding sequence with its own scheduled follow-up Lambda
    (see the diagram and the "Offboarding" section of the README).
+=======
+This project has three moving parts that all touch the same Okta org from
+different angles:
+
+1. A **real-time provisioning path** — Workday pushes new-hire/termination
+   events, a Lambda acts on them immediately.
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 2. A **declarative baseline** — Terraform owns the org's groups, group rules,
    app assignments, and policies as code, applied through GitHub Actions.
 3. A **drift governance loop** — a second Lambda and a scheduled GitHub Action
    both watch for the baseline and the real world falling out of sync, from
    two different angles (see the note at the end of this doc).
+<<<<<<< HEAD
 4. A **periodic access review** — a third Lambda that doesn't wait for a
    change at all; it directly audits every active user's current group
    membership and login recency on a schedule (see the note at the end of
    this doc for how this differs from the drift checks above).
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 ```
 1) NEW HIRE / TERMINATION FLOW  (event-driven, real-time)
@@ -28,13 +39,18 @@ different angles:
   API Gateway   POST /provision   (terraform/modules/api_gateway)
         │
         ▼
+<<<<<<< HEAD
   Lambda: provisioning  (lambda/, deployed by terraform/modules/lambda_provisioning,
                          reserved_concurrent_executions=10 caps blast radius)
+=======
+  Lambda: provisioning  (lambda/, deployed by terraform/modules/lambda_provisioning)
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
         │
         │  reads its Okta token from SSM at invocation time (execution role
         │  has ssm:GetParameter on /iam-automation-demo/okta/api_token only -
         │  the token's value never appears in Terraform config, state, or a
         │  plain Lambda environment variable)
+<<<<<<< HEAD
         │
         │  handler.py rejects outright (structured log + raise, no partial
         │  processing) any single invocation whose event carries more than
@@ -115,6 +131,12 @@ looking like drift.
         │
         ▼
   SSM pending-removals list rewritten with only the still-waiting records
+=======
+        ▼
+  Okta org   (Okta Users & Groups API)
+      - creates/activates or deactivates the user
+      - adds/removes group membership directly
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 
 2) DECLARATIVE BASELINE  (Terraform, CI/CD)
@@ -169,6 +191,7 @@ looking like drift.
         │                                                               │
         │      5. always: structured JSON log entry -> CloudWatch Logs  │
         │      6. on escalation: open a GitHub Issue                    │
+<<<<<<< HEAD
         │         "Manual Okta change detected — review required" AND   │
         │         post a Slack alert (#iam-alerts, warning severity),   │
         │         then record {issue_number, title, opened_at} to SSM   │
@@ -185,6 +208,9 @@ looking like drift.
         │         only. Anyone else -> ESCALATE: "Administrator access  │
         │         granted" GitHub issue + red/urgent Slack alert, 24h   │
         │         response deadline, regardless of time of day          │
+=======
+        │         "Manual Okta change detected — review required"       │
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
         │                                                               │
         └─── slow path: daily at 08:00 UTC ─────────────────────────────┘
              GitHub Actions: terraform-drift.yml
@@ -192,6 +218,7 @@ looking like drift.
                2. exit code 2 (changes found) -> open a GitHub Issue
                   "Drift detected in Okta infrastructure",
                   full plan output attached
+<<<<<<< HEAD
 
 
 3c) ADMIN-ROLE-HOLDER AUDIT  (every 15 minutes, same run as 3, catches
@@ -275,6 +302,8 @@ looking like drift.
   GitHub Issue: "Access review findings — manual review required"
       (Markdown table: user id, email, current groups, expected group,
        reason - and separately, user id, email, last login, days since login)
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 ```
 
 ## Why two drift-detection paths, not one
@@ -299,6 +328,7 @@ A manual group edit gets caught almost immediately by the auditor Lambda
 (what it actually changed). See `docs/drift-detection.md` for the full
 detect → log → evaluate → resolve/escalate story, including a worked example.
 
+<<<<<<< HEAD
 ## Why access review is a different kind of check, not a third drift path
 
 Both checks above are triggered by a *change*: a plan diff, or a System Log
@@ -320,12 +350,15 @@ things* that have been true for a while, and answers a question the other
 two structurally can't: not "did anything change," but "is everything still
 correct right now."
 
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 ## Resource ownership
 
 | Concern                                   | Owned by                          |
 |--------------------------------------------|------------------------------------|
 | User lifecycle (create/deactivate)         | `lambda/` provisioning Lambda      |
 | Group/group-rule/app-assignment/policy config | Terraform (`terraform/`)        |
+<<<<<<< HEAD
 | Admin role grants (`SUPER_ADMIN`, etc.)     | `terraform/modules/okta_admin_roles` - empty by default, tracked in `managed_resources.json` once populated |
 | `pending_removal` holding group             | Terraform (`terraform/main.tf`'s `okta_groups` module) creates it; `okta_client.py` manages its membership imperatively, not a dynamic rule |
 | Multi-app offboarding sequencing            | `lambda/src/offboarding_manager.py`, driven by `offboarding_config.json` |
@@ -357,3 +390,12 @@ namespace. All three custom-metric widgets are real Terraform, wired up in
 advance of anything actually publishing to them - no code in this repo calls
 `put_metric_data` yet, so those three will render with no data until
 something does.
+=======
+| Provisioning Lambda + its HTTP trigger     | `terraform/modules/lambda_provisioning`, `terraform/modules/api_gateway` |
+| Drift auditor Lambda + its schedule        | `terraform/modules/okta_drift_auditor` |
+| Terraform state                            | Terraform Cloud (`jangus-iam-demo`)|
+| CI/CD for the above                        | GitHub Actions                     |
+| Secret values (Okta token, GitHub token)   | SSM Parameter Store (SecureString) — created out-of-band, never in Terraform config/state; each Lambda's IAM role can read only the parameter(s) it needs |
+| "Was this change authorized?" audit        | `lambda-drift-auditor/`            |
+| "Does reality match config?" audit         | `terraform-drift.yml`              |
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

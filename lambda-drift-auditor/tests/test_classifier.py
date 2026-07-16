@@ -3,11 +3,15 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+<<<<<<< HEAD
 from classifier import (  # noqa: E402
     classify_admin_privilege_event,
     classify_event,
     is_admin_privilege_event,
 )
+=======
+from classifier import classify_event  # noqa: E402
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 
 def test_known_automation_actor_is_approved(monkeypatch):
@@ -35,6 +39,7 @@ def test_missing_actor_requires_review(monkeypatch):
     monkeypatch.delenv("KNOWN_AUTOMATION_ACTOR_IDS", raising=False)
 
     assert classify_event({}) == "manual_review_required"
+<<<<<<< HEAD
 
 
 def test_is_admin_privilege_event_true_for_grant_with_role_target():
@@ -76,3 +81,5 @@ def test_classify_admin_privilege_event_unknown_actor(monkeypatch):
     event = {"actor": {"id": "00u1someitadmin", "type": "User"}}
 
     assert classify_admin_privilege_event(event) == "admin_grant_unknown_actor"
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

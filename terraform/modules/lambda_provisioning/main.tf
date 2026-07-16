@@ -37,18 +37,28 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
   })
 }
 
+<<<<<<< HEAD
 # Lets the function read its Okta API token, GitHub token, and Slack webhook
 # URL from SSM at invocation time - none of these secrets' values ever
 # appear in a Terraform-managed environment variable or in Terraform state,
 # only their parameter names do (set below).
 resource "aws_iam_role_policy" "secrets_ssm_read" {
   name = "${var.function_name}-secrets-read"
+=======
+# Lets the function read its own Okta API token from SSM at invocation time
+# so it can call the Okta API - the token's value never appears in a
+# Terraform-managed environment variable or in Terraform state, only its
+# parameter name does (set below).
+resource "aws_iam_role_policy" "okta_token_read" {
+  name = "${var.function_name}-okta-token-read"
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
   role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
+<<<<<<< HEAD
         Sid    = "ReadSecretParameters"
         Effect = "Allow"
         Action = ["ssm:GetParameter"]
@@ -57,6 +67,12 @@ resource "aws_iam_role_policy" "secrets_ssm_read" {
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_param_name}",
           "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.slack_webhook_param_name}",
         ]
+=======
+        Sid      = "ReadOktaTokenParameter"
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter"]
+        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.okta_api_token_ssm_param_name}"
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
       },
       {
         # SSM SecureString parameters under the default AWS-managed key are
@@ -79,6 +95,7 @@ resource "aws_iam_role_policy" "secrets_ssm_read" {
   })
 }
 
+<<<<<<< HEAD
 # The pending-removals list is plain state, not a secret - offboarding_manager.py
 # appends to it and scheduled_removal.py reads and rewrites it, so both need
 # read/write/delete, unlike the read-only secrets above.
@@ -97,6 +114,8 @@ resource "aws_iam_role_policy" "pending_removals_state" {
   })
 }
 
+=======
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 resource "aws_lambda_function" "this" {
   function_name    = var.function_name
   role             = aws_iam_role.lambda_exec.arn
@@ -106,6 +125,7 @@ resource "aws_lambda_function" "this" {
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
+<<<<<<< HEAD
   # Blast radius protection: caps how many concurrent invocations this
   # function can ever have, regardless of how much traffic API Gateway
   # forwards to it - a runaway retry storm or bulk export gone wrong can't
@@ -122,6 +142,13 @@ resource "aws_lambda_function" "this" {
       SLACK_WEBHOOK_PARAM_NAME    = var.slack_webhook_param_name
       SLACK_ALERTS_CHANNEL        = var.slack_alerts_channel
       PENDING_REMOVALS_PARAM_NAME = var.pending_removals_param_name
+=======
+  environment {
+    variables = {
+      OKTA_ORG_NAME             = var.okta_org_name
+      OKTA_BASE_URL             = var.okta_base_url
+      OKTA_API_TOKEN_PARAM_NAME = var.okta_api_token_ssm_param_name
+>>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     }
   }
 
