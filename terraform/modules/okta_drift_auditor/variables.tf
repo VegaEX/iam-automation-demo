@@ -74,8 +74,9 @@ variable "known_automation_actor_ids" {
 }
 
 variable "managed_resource_ids_json" {
-  description = "JSON blob of the Okta resource IDs Terraform currently manages (group/app/policy IDs), used to filter which System Log events the auditor cares about. Passed in as plain Lambda config (not a secret) - the root module supplies this from lambda-drift-auditor/managed_resources.json, or ideally from terraform output -json after each apply."
+  description = "JSON blob of the Okta resource IDs Terraform currently manages (group/app/policy IDs), used to filter which System Log events the auditor cares about. Not sourced via file() from this module - Terraform Cloud's remote runners don't have lambda-drift-auditor/ available relative to this module's path. Defaults to an empty object; the real value is injected into the Lambda's MANAGED_RESOURCE_IDS_JSON environment variable out-of-band, populated from `terraform output -json` after each apply."
   type        = string
+  default     = "{}"
 }
 
 variable "log_retention_days" {

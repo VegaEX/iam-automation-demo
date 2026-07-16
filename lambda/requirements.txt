@@ -1,2 +1,1 @@
-# Placeholder: Python dependencies for the Lambda function (e.g. requests, and
-# any test-only deps like pytest/moto listed separately or via extras).
+requests>=2.31.0,<3.0.0

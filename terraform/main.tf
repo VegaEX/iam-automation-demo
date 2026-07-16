@@ -75,5 +75,9 @@ module "okta_drift_auditor" {
   okta_base_url              = var.okta_base_url
   github_repo                = var.github_repo
   known_automation_actor_ids = var.known_automation_actor_ids
-  managed_resource_ids_json  = file("${path.module}/../lambda-drift-auditor/managed_resources.json")
+  # managed_resource_ids_json intentionally omitted - defaults to "{}".
+  # The real value is injected into the Lambda's environment variable
+  # out-of-band from `terraform output -json` after each apply, not sourced
+  # via file() here (Terraform Cloud's remote runners don't have
+  # lambda-drift-auditor/ available relative to this module).
 }

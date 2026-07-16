@@ -1,0 +1,68 @@
+{
+  "employee_id": {
+    "type": "string",
+    "required": true,
+    "default": null,
+    "okta_attribute": "employeeNumber"
+  },
+  "first_name": {
+    "type": "string",
+    "required": true,
+    "default": null,
+    "okta_attribute": "firstName"
+  },
+  "last_name": {
+    "type": "string",
+    "required": true,
+    "default": null,
+    "okta_attribute": "lastName"
+  },
+  "email": {
+    "type": "email",
+    "required": true,
+    "default": null,
+    "okta_attribute": "email"
+  },
+  "department": {
+    "type": "string",
+    "required": true,
+    "default": null,
+    "okta_attribute": "department"
+  },
+  "title": {
+    "type": "string",
+    "required": false,
+    "default": "",
+    "okta_attribute": "title"
+  },
+  "manager_email": {
+    "type": "email",
+    "required": false,
+    "default": null,
+    "okta_attribute": "managerId"
+  },
+  "start_date": {
+    "type": "date",
+    "required": true,
+    "default": null,
+    "okta_attribute": "hireDate"
+  },
+  "employment_type": {
+    "type": "string",
+    "required": true,
+    "default": null,
+    "okta_attribute": "userType"
+  },
+  "cost_center": {
+    "type": "string",
+    "required": false,
+    "default": "",
+    "okta_attribute": "costCenter"
+  },
+  "phone": {
+    "type": "string",
+    "required": false,
+    "default": "",
+    "okta_attribute": "primaryPhone"
+  }
+}
