@@ -1,0 +1,2 @@
+# Placeholder: workflow triggered on pull_request against main - runs terraform fmt/validate
+# and terraform plan (against the Terraform Cloud workspace) and posts the plan output as a PR comment.

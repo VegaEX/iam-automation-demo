@@ -1,0 +1,2 @@
+# Placeholder: workflow triggered on push/merge to main - runs terraform apply
+# against the Terraform Cloud workspace to roll out the merged changes.

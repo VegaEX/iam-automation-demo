@@ -1,0 +1,51 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfplan
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Terraform variables - ignore all tfvars files except the example
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Lambda build artifacts
+lambda/build/
+lambda/dist/
+*.zip
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+venv/
+.venv/
+
+# Environment files
+.env
+.env.*
+
+# AWS credentials
+.aws/
+**/.aws/credentials
+**/.aws/config
+*.pem
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db

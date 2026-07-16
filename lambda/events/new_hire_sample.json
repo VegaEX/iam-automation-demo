@@ -1,0 +1,2 @@
+// Placeholder: sample API Gateway event payload representing a new-hire event,
+// used for local invocation testing (e.g. via `sam local invoke` or a test harness).
