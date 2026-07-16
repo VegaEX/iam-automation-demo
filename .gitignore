@@ -20,6 +20,7 @@ terraform.rc
 # Lambda build artifacts
 lambda/build/
 lambda/dist/
+lambda-drift-auditor/build/
 *.zip
 
 # Python
@@ -49,3 +50,6 @@ venv/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Screenshots
+screenshots/

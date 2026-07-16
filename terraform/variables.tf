@@ -27,3 +27,20 @@ variable "environment" {
   type        = string
   default     = "dev"
 }
+
+variable "github_repo" {
+  description = "owner/repo (e.g. \"jangus/iam-automation-demo\") that the okta-drift-auditor Lambda opens \"Manual Okta change detected\" issues against."
+  type        = string
+}
+
+variable "enable_aws_resources" {
+  description = "Whether to create the AWS-side resources (both Lambdas, API Gateway, EventBridge). Defaults to false so the Okta-only configuration can be applied without AWS credentials or the SSM secrets those modules depend on."
+  type        = bool
+  default     = false
+}
+
+variable "known_automation_actor_ids" {
+  description = "Comma-separated Okta actor IDs (API token IDs) the drift auditor treats as known automation. Starts empty - these IDs are only knowable once the provisioning Lambda's and CI's Okta tokens have actually been used and observed in the Okta System Log, so fill this in after first deploy."
+  type        = string
+  default     = ""
+}

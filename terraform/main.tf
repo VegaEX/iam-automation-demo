@@ -4,6 +4,7 @@ module "okta_groups" {
   groups = [
     { name = "eng-base", description = "Baseline access group for Engineering staff" },
     { name = "ops-base", description = "Baseline access group for Operations/IT staff" },
+    { name = "it-base", description = "IT department base access group" },
     { name = "all-staff", description = "Automatic membership for every active employee" },
   ]
 
@@ -53,5 +54,33 @@ module "okta_policies" {
   admin_group_id = module.okta_groups.group_ids["ops-base"]
 }
 
-# TODO: wire up modules/lambda_provisioning and modules/api_gateway once the
-# Lambda source under lambda/ is implemented.
+module "lambda_provisioning" {
+  source = "./modules/lambda_provisioning"
+  count  = var.enable_aws_resources ? 1 : 0
+
+  okta_org_name = var.okta_org_name
+  okta_base_url = var.okta_base_url
+}
+
+module "api_gateway" {
+  source = "./modules/api_gateway"
+  count  = var.enable_aws_resources ? 1 : 0
+
+  lambda_function_name = module.lambda_provisioning[0].function_name
+  lambda_invoke_arn    = module.lambda_provisioning[0].invoke_arn
+}
+
+module "okta_drift_auditor" {
+  source = "./modules/okta_drift_auditor"
+  count  = var.enable_aws_resources ? 1 : 0
+
+  okta_org_name              = var.okta_org_name
+  okta_base_url              = var.okta_base_url
+  github_repo                = var.github_repo
+  known_automation_actor_ids = var.known_automation_actor_ids
+  # managed_resource_ids_json intentionally omitted - defaults to "{}".
+  # The real value is injected into the Lambda's environment variable
+  # out-of-band from `terraform output -json` after each apply, not sourced
+  # via file() here (Terraform Cloud's remote runners don't have
+  # lambda-drift-auditor/ available relative to this module).
+}

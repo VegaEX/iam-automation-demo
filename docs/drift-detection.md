@@ -132,3 +132,105 @@ back in sync (see the full comment in `okta_groups/main.tf` for details):
    Simpler, but the new group gets a new Okta ID, so any existing
    memberships, app assignments, or policy references tied to the old group
    are lost and have to be redone.
+
+---
+
+## The full governance loop
+
+Everything above is about *resources* — does a group/policy/app-assignment
+that exists in Okta match, or even appear in, Terraform's config. That's only
+half the picture. This project also runs a second, complementary loop that
+asks a different question: not "does this match config," but **"who made
+this change, and should they have?"** That's the job of the
+`okta-drift-auditor` Lambda (`lambda-drift-auditor/`), running on an
+EventBridge schedule every 15 minutes. It moves through four stages every
+time it runs:
+
+### 1. Detect
+
+Pull every Okta System Log event published in the last 15 minutes
+(`GET /api/v1/logs?since=...`), then narrow to the event types that touch
+things Terraform manages: group lifecycle/membership, policy lifecycle/rule,
+and app group/user assignment events. Anything else (logins, password resets,
+etc.) is out of scope and discarded immediately.
+
+### 2. Log
+
+Of the events that pass the type filter, keep only the ones whose target
+resource ID is in `managed_resources.json` (the current set of
+Terraform-managed group/app/policy IDs — regenerated from
+`terraform output -json` after every apply). For every one of those, a
+structured JSON entry is written to CloudWatch Logs **unconditionally** —
+event type, timestamp, actor, target, and the classification below. This
+happens whether or not anything gets escalated, so CloudWatch ends up with a
+complete audit trail of every change to Terraform-managed Okta resources,
+not just the suspicious ones.
+
+### 3. Evaluate
+
+Each event's actor gets classified into exactly one bucket:
+
+| Classification           | Actor looks like                                  | Meaning                                              |
+|---------------------------|----------------------------------------------------|-------------------------------------------------------|
+| `approved_automation`     | An Okta API token listed in `KNOWN_AUTOMATION_ACTOR_IDS` | The provisioning Lambda or the Terraform/CI pipeline made this change. Expected. |
+| `approved_hr_pattern`     | Okta's own `System` actor                          | A dynamic group rule reacted automatically to an upstream profile attribute change (see the worked example below). Expected. |
+| `manual_review_required`  | Anything else — a live `User` actor                | A person changed a Terraform-managed resource directly, outside every automated path. Not expected. |
+
+### 4. Resolve or escalate
+
+- `approved_automation` / `approved_hr_pattern` → nothing further happens.
+  The CloudWatch log entry from step 2 *is* the record; there's nothing to
+  act on.
+- `manual_review_required` → the Lambda calls the GitHub Issues API and opens
+  an issue titled **"Manual Okta change detected — review required"**,
+  containing the event type, timestamp, actor, target(s), outcome, and the
+  raw System Log event for debugging. A human now decides whether to revert
+  the change (bring Okta back to match Terraform) or import it (bring
+  Terraform's config up to match what actually happened).
+
+### Worked example: the manager reassignment scenario
+
+This is the case `approved_hr_pattern` exists for — it's easy to mistake for
+drift if you don't know the group rules are supposed to do this.
+
+1. Priya's manager reassigns her from Engineering to Operations in Workday.
+2. That flows through to Okta as a `department` profile attribute change:
+   `"Engineering"` → `"Operations"`.
+3. Okta's own dynamic group rules — `Assign Engineering to eng-base` and
+   `Assign Operations to ops-base` (defined in
+   `terraform/modules/okta_groups/main.tf`) — re-evaluate the instant the
+   attribute changes. **Okta itself** removes Priya from `eng-base` and adds
+   her to `ops-base`. No person and no Lambda did this directly; Okta's rule
+   engine did.
+4. That produces two System Log events — `group.user_membership.remove` on
+   `eng-base` and `group.user_membership.add` on `ops-base` — both with
+   `actor.type == "System"`.
+5. Within 15 minutes, `okta-drift-auditor` picks both events up. They target
+   Terraform-managed group IDs, so they pass the filter in step 2.
+   `classify_event()` sees the `System` actor type and returns
+   `approved_hr_pattern`.
+6. Result: two CloudWatch log entries recording exactly what happened, and
+   **no GitHub issue** — this was the system working as designed.
+
+**Contrast this with an actual incident:** an IT admin, working from a
+support ticket, manually drags Priya into `ops-base` in the Okta console
+directly — but nobody has actually updated her `department` attribute in
+Workday yet. The System Log event looks almost identical
+(`group.user_membership.add` on `ops-base`), but this time `actor.type` is
+`User` and the actor ID isn't in `KNOWN_AUTOMATION_ACTOR_IDS`.
+`classify_event()` returns `manual_review_required`, and the Lambda opens
+**"Manual Okta change detected — review required"**, naming the admin, the
+timestamp, and the group — so someone can confirm whether the HR record
+needs to catch up, or whether the manual change should be undone and left to
+the group rule to handle once it does.
+
+### How this loop relates to the other two
+
+`okta-drift-auditor` never looks at Terraform config or state at all — it
+only knows the *list* of resource IDs Terraform owns, not their intended
+attribute values. It can tell you *who* changed `eng-base` and whether that
+was expected, but not whether the change actually left `eng-base` looking
+like `terraform/main.tf` says it should. That's still `terraform plan`'s job
+(Type 1, above) and the out-of-band group audit's job (Type 2, above) — this
+Lambda is a faster, identity-aware complement to both, not a replacement for
+either.
