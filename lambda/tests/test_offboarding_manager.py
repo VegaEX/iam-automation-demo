@@ -5,24 +5,29 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import offboarding_manager  # noqa: E402
+from issue_format import format_human_date  # noqa: E402
 
 
 def _set_required_env(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN_PARAM_NAME", "/iam-demo/github-token")
     monkeypatch.setenv("GITHUB_REPO", "acme-corp/iam-automation-demo")
     monkeypatch.setenv("PENDING_REMOVALS_PARAM_NAME", "/iam-demo/pending-removals")
+    monkeypatch.setenv("SLACK_WEBHOOK_PARAM_NAME", "/iam-demo/slack-webhook")
 
 
 def _mocked_run_offboarding(monkeypatch, **kwargs):
     with patch.object(offboarding_manager, "GitHubClient") as mock_gh_cls, patch.object(
         offboarding_manager, "GoogleWorkspaceClient"
-    ) as mock_google_cls, patch.object(
+    ) as mock_google_cls, patch.object(offboarding_manager, "SlackClient"), patch.object(
         offboarding_manager, "get_secret", return_value="dummy-secret"
     ), patch.object(offboarding_manager, "get_pending_removals", return_value=[]), patch.object(
         offboarding_manager, "put_pending_removals"
     ) as mock_put_pending:
         mock_gh = mock_gh_cls.return_value
-        mock_gh.create_issue.return_value = {"number": 42}
+        mock_gh.create_issue.return_value = {
+            "number": 42,
+            "html_url": "https://github.com/acme-corp/iam-automation-demo/issues/42",
+        }
 
         mock_google = mock_google_cls.return_value
         mock_google.delegate_inbox.return_value = {"status": "DELEGATION_ACTIVE"}
@@ -67,7 +72,7 @@ def test_offboarding_manager_executes_correct_actions_per_app(monkeypatch):
     _, kwargs = mock_gh.create_issue.call_args
     assert kwargs["title"] == "Offboarding checklist — Jamie Doe"
     assert "departed@acme-corp.example" in kwargs["body"]
-    assert result["removal_date"] in kwargs["body"]
+    assert format_human_date(result["removal_date"]) in kwargs["body"]
 
     mock_put_pending.assert_called_once()
     _, records = mock_put_pending.call_args[0]

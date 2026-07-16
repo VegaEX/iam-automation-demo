@@ -61,6 +61,24 @@ variable "github_repo" {
   type        = string
 }
 
+variable "slack_webhook_param_name" {
+  description = "Name of the SSM SecureString parameter holding the Slack incoming webhook URL used for #iam-alerts. Terraform only references the name, never the value - same out-of-band-creation rule as the other secrets. Used by access_review.py, offboarding_manager.py, schema_validator.py, and scheduled_removal.py."
+  type        = string
+  default     = "/iam-demo/slack-webhook"
+}
+
+variable "slack_alerts_channel" {
+  description = "Slack channel this Lambda's alerts post to."
+  type        = string
+  default     = "#iam-alerts"
+}
+
+variable "pending_removals_param_name" {
+  description = "Name of the SSM parameter (plain String, not a secret) storing the JSON list of pending offboarding removals. Read and written by offboarding_manager.py and scheduled_removal.py."
+  type        = string
+  default     = "/iam-demo/pending-removals"
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log group retention, in days."
   type        = number

@@ -15,15 +15,19 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("OKTA_API_TOKEN_PARAM_NAME", "/iam-automation-demo/okta/api_token")
     monkeypatch.setenv("GITHUB_TOKEN_PARAM_NAME", "/iam-automation-demo/github/token")
     monkeypatch.setenv("GITHUB_REPO", "acme/iam-automation-demo")
-    monkeypatch.setenv("SLACK_WEBHOOK_URL_PARAM_NAME", "/iam-automation-demo/slack/webhook_url")
+    monkeypatch.setenv("SLACK_WEBHOOK_PARAM_NAME", "/iam-demo/slack-webhook")
     monkeypatch.setenv(
         "OPEN_ESCALATIONS_PARAM_NAME", "/iam-automation-demo/drift-auditor/open-escalations"
+    )
+    monkeypatch.setenv(
+        "REPORTED_ADMIN_ALERTS_PARAM_NAME", "/iam-automation-demo/drift-auditor/reported-admins"
     )
     monkeypatch.setenv(
         "MANAGED_RESOURCE_IDS_JSON",
         json.dumps({"group_ids": {"eng-base": "00gtracked"}}),
     )
     monkeypatch.setenv("KNOWN_AUTOMATION_ACTOR_IDS", "00tautomation")
+    monkeypatch.setenv("KNOWN_ADMIN_EMAILS", "")
 
 
 def test_manual_change_to_managed_resource_opens_issue_and_posts_to_slack(monkeypatch):
@@ -43,18 +47,28 @@ def test_manual_change_to_managed_resource_opens_issue_and_posts_to_slack(monkey
         handler, "get_secret", return_value="dummy-secret"
     ), patch.object(handler, "get_open_escalations", return_value=[]), patch.object(
         handler, "put_open_escalations"
-    ) as mock_put_escalations:
+    ) as mock_put_escalations, patch.object(
+        handler, "list_admin_role_holders", return_value=[]
+    ), patch.object(handler, "get_json_list", return_value=[]):
         mock_okta_cls.return_value.get_events_since.return_value = [manual_event]
         mock_gh = mock_gh_cls.return_value
         mock_gh.create_issue.return_value = {
             "number": 123,
             "title": "Manual Okta change detected — review required",
+            "html_url": "https://github.com/acme/iam-automation-demo/issues/123",
         }
         mock_slack = mock_slack_cls.return_value
 
         results = handler.handler({}, None)
 
-        assert results == {"approved": 0, "escalated": 1, "ignored": 0}
+        assert results == {
+            "approved": 0,
+            "escalated": 1,
+            "ignored": 0,
+            "admin_grants_approved": 0,
+            "admin_grants_escalated": 0,
+            "unexpected_admin_holders": 0,
+        }
         mock_gh.create_issue.assert_called_once()
         _, kwargs = mock_gh.create_issue.call_args
         assert kwargs["title"] == "Manual Okta change detected — review required"
@@ -87,6 +101,8 @@ def test_automation_change_is_approved_without_issue_or_slack(monkeypatch):
         handler, "GitHubClient"
     ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
         handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(handler, "list_admin_role_holders", return_value=[]), patch.object(
+        handler, "get_json_list", return_value=[]
     ):
         mock_okta_cls.return_value.get_events_since.return_value = [automation_event]
         mock_gh = mock_gh_cls.return_value
@@ -94,7 +110,14 @@ def test_automation_change_is_approved_without_issue_or_slack(monkeypatch):
 
         results = handler.handler({}, None)
 
-        assert results == {"approved": 1, "escalated": 0, "ignored": 0}
+        assert results == {
+            "approved": 1,
+            "escalated": 0,
+            "ignored": 0,
+            "admin_grants_approved": 0,
+            "admin_grants_escalated": 0,
+            "unexpected_admin_holders": 0,
+        }
         mock_gh.create_issue.assert_not_called()
         mock_slack.post_alert.assert_not_called()
 
@@ -114,6 +137,8 @@ def test_change_to_unmanaged_resource_is_ignored(monkeypatch):
         handler, "GitHubClient"
     ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
         handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(handler, "list_admin_role_holders", return_value=[]), patch.object(
+        handler, "get_json_list", return_value=[]
     ):
         mock_okta_cls.return_value.get_events_since.return_value = [unrelated_event]
         mock_gh = mock_gh_cls.return_value
@@ -121,16 +146,208 @@ def test_change_to_unmanaged_resource_is_ignored(monkeypatch):
 
         results = handler.handler({}, None)
 
-        assert results == {"approved": 0, "escalated": 0, "ignored": 1}
+        assert results == {
+            "approved": 0,
+            "escalated": 0,
+            "ignored": 1,
+            "admin_grants_approved": 0,
+            "admin_grants_escalated": 0,
+            "unexpected_admin_holders": 0,
+        }
         mock_gh.create_issue.assert_not_called()
         mock_slack.post_alert.assert_not_called()
+
+
+def test_admin_grant_from_unknown_actor_escalates_urgently(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    grant_event = {
+        "eventType": "user.account.privilege.grant",
+        "published": "2026-07-15T08:05:00.000Z",
+        "uuid": "abc-123",
+        "actor": {"id": "00uhuman", "type": "User", "displayName": "Jane Admin"},
+        "target": [
+            {"id": "00u9target", "type": "User", "displayName": "Sam Newuser"},
+            {"type": "AdminRoleTarget", "displayName": "Super Administrator"},
+        ],
+        "outcome": {"result": "SUCCESS"},
+    }
+
+    with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
+        handler, "GitHubClient"
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(handler, "get_open_escalations", return_value=[]), patch.object(
+        handler, "put_open_escalations"
+    ), patch.object(handler, "list_admin_role_holders", return_value=[]), patch.object(
+        handler, "get_json_list", return_value=[]
+    ):
+        mock_okta_cls.return_value.get_events_since.return_value = [grant_event]
+        mock_gh = mock_gh_cls.return_value
+        mock_gh.create_issue.return_value = {
+            "number": 200,
+            "title": "Administrator access granted — immediate review required",
+            "html_url": "https://github.com/acme/iam-automation-demo/issues/200",
+        }
+        mock_slack = mock_slack_cls.return_value
+
+        results = handler.handler({}, None)
+
+        assert results["admin_grants_escalated"] == 1
+        assert results["admin_grants_approved"] == 0
+
+        mock_gh.create_issue.assert_called_once()
+        _, kwargs = mock_gh.create_issue.call_args
+        assert kwargs["title"] == "Administrator access granted — immediate review required"
+        assert "Super Administrator" in kwargs["body"]
+        assert "Sam Newuser" in kwargs["body"]
+        assert "This requires a response within 24 hours." in kwargs["body"]
+
+        mock_slack.post_alert.assert_called_once()
+        _, slack_kwargs = mock_slack.post_alert.call_args
+        assert slack_kwargs["severity"] == "critical"
+
+
+def test_admin_grant_from_known_automation_is_approved(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    grant_event = {
+        "eventType": "user.account.privilege.grant",
+        "published": "2026-07-15T08:05:00.000Z",
+        "uuid": "abc-456",
+        "actor": {"id": "00tautomation", "type": "SSWS", "displayName": "terraform-ci"},
+        "target": [
+            {"id": "00u9target", "type": "User", "displayName": "Sam Newuser"},
+            {"type": "AdminRoleTarget", "displayName": "Super Administrator"},
+        ],
+        "outcome": {"result": "SUCCESS"},
+    }
+
+    with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
+        handler, "GitHubClient"
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(handler, "list_admin_role_holders", return_value=[]), patch.object(
+        handler, "get_json_list", return_value=[]
+    ):
+        mock_okta_cls.return_value.get_events_since.return_value = [grant_event]
+        mock_gh = mock_gh_cls.return_value
+        mock_slack = mock_slack_cls.return_value
+
+        results = handler.handler({}, None)
+
+        assert results["admin_grants_escalated"] == 0
+        assert results["admin_grants_approved"] == 1
+        mock_gh.create_issue.assert_not_called()
+        mock_slack.post_alert.assert_not_called()
+
+
+def test_unexpected_admin_holder_not_in_known_emails_is_escalated(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("KNOWN_ADMIN_EMAILS", "expected-admin@acme-corp.example")
+
+    with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
+        handler, "GitHubClient"
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(
+        handler,
+        "list_admin_role_holders",
+        return_value=[{"profile": {"email": "surprise-admin@acme-corp.example"}}],
+    ), patch.object(handler, "get_json_list", return_value=[]) as mock_get_json, patch.object(
+        handler, "put_json_list"
+    ) as mock_put_json, patch.object(handler, "get_open_escalations", return_value=[]), patch.object(
+        handler, "put_open_escalations"
+    ):
+        mock_okta_cls.return_value.get_events_since.return_value = []
+        mock_gh = mock_gh_cls.return_value
+        mock_gh.create_issue.return_value = {
+            "number": 300,
+            "title": "Administrator access granted — immediate review required",
+            "html_url": "https://github.com/acme/iam-automation-demo/issues/300",
+        }
+        mock_slack = mock_slack_cls.return_value
+
+        results = handler.handler({}, None)
+
+        assert results["unexpected_admin_holders"] == 1
+        mock_get_json.assert_called_once()
+
+        mock_gh.create_issue.assert_called_once()
+        _, kwargs = mock_gh.create_issue.call_args
+        assert "surprise-admin@acme-corp.example" in kwargs["body"]
+
+        mock_slack.post_alert.assert_called_once()
+        _, slack_kwargs = mock_slack.post_alert.call_args
+        assert slack_kwargs["severity"] == "critical"
+
+        mock_put_json.assert_called_once()
+        _, saved = mock_put_json.call_args[0]
+        assert saved == ["surprise-admin@acme-corp.example"]
+
+
+def test_known_admin_holder_is_not_escalated(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.setenv("KNOWN_ADMIN_EMAILS", "expected-admin@acme-corp.example")
+
+    with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
+        handler, "GitHubClient"
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(
+        handler,
+        "list_admin_role_holders",
+        return_value=[{"profile": {"email": "expected-admin@acme-corp.example"}}],
+    ), patch.object(handler, "get_json_list", return_value=[]), patch.object(
+        handler, "put_json_list"
+    ) as mock_put_json:
+        mock_okta_cls.return_value.get_events_since.return_value = []
+        mock_gh = mock_gh_cls.return_value
+        mock_slack = mock_slack_cls.return_value
+
+        results = handler.handler({}, None)
+
+        assert results["unexpected_admin_holders"] == 0
+        mock_gh.create_issue.assert_not_called()
+        mock_slack.post_alert.assert_not_called()
+        mock_put_json.assert_not_called()
+
+
+def test_already_reported_admin_holder_is_not_reescalated(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
+        handler, "GitHubClient"
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ), patch.object(
+        handler,
+        "list_admin_role_holders",
+        return_value=[{"profile": {"email": "surprise-admin@acme-corp.example"}}],
+    ), patch.object(
+        handler, "get_json_list", return_value=["surprise-admin@acme-corp.example"]
+    ), patch.object(handler, "put_json_list") as mock_put_json:
+        mock_okta_cls.return_value.get_events_since.return_value = []
+        mock_gh = mock_gh_cls.return_value
+        mock_slack = mock_slack_cls.return_value
+
+        results = handler.handler({}, None)
+
+        assert results["unexpected_admin_holders"] == 0
+        mock_gh.create_issue.assert_not_called()
+        mock_slack.post_alert.assert_not_called()
+        mock_put_json.assert_not_called()
 
 
 def test_check_unacknowledged_escalations_reminds_for_issue_open_over_24h(monkeypatch):
     _set_required_env(monkeypatch)
 
     stale_opened_at = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
-    record = {"issue_number": 123, "title": "Manual Okta change detected — review required", "opened_at": stale_opened_at}
+    record = {
+        "issue_number": 123,
+        "title": "Manual Okta change detected — review required",
+        "opened_at": stale_opened_at,
+    }
 
     with patch.object(handler, "get_open_escalations", return_value=[record]), patch.object(
         handler, "put_open_escalations"

@@ -79,9 +79,12 @@ resource "aws_iam_role_policy" "secrets_ssm_read" {
   })
 }
 
-# The pending-removals list is plain state, not a secret - offboarding_manager.py
-# appends to it and scheduled_removal.py reads and rewrites it, so both need
-# read/write/delete, unlike the read-only secrets above.
+# The pending-removals list is plain state, not a secret - this function
+# reads it and rewrites it (minus whichever records it just processed) on
+# every daily sweep, mirroring modules/lambda_provisioning's grant for the
+# same parameter (that role also needs DeleteParameter, for a different
+# code path in offboarding_manager.py - this one doesn't delete the
+# parameter itself, only overwrites its value).
 resource "aws_iam_role_policy" "pending_removals_state" {
   name = "${var.function_name}-pending-removals-state"
   role = aws_iam_role.lambda_exec.id
@@ -89,9 +92,9 @@ resource "aws_iam_role_policy" "pending_removals_state" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid      = "ReadWriteDeletePendingRemovalsParameter"
+      Sid      = "ReadWritePendingRemovalsParameter"
       Effect   = "Allow"
-      Action   = ["ssm:GetParameter", "ssm:PutParameter", "ssm:DeleteParameter"]
+      Action   = ["ssm:GetParameter", "ssm:PutParameter"]
       Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.pending_removals_param_name}"
     }]
   })
@@ -105,12 +108,6 @@ resource "aws_lambda_function" "this" {
   timeout          = var.timeout
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)
-
-  # Blast radius protection: caps how many concurrent invocations this
-  # function can ever have, regardless of how much traffic API Gateway
-  # forwards to it - a runaway retry storm or bulk export gone wrong can't
-  # scale this function past reserved_concurrent_executions no matter what.
-  reserved_concurrent_executions = var.reserved_concurrent_executions
 
   environment {
     variables = {
@@ -126,4 +123,23 @@ resource "aws_lambda_function" "this" {
   }
 
   depends_on = [aws_cloudwatch_log_group.this]
+}
+
+resource "aws_cloudwatch_event_rule" "schedule" {
+  name                = "${var.function_name}-schedule"
+  description         = "Triggers ${var.function_name} to sweep the pending-removals list once a day."
+  schedule_expression = var.schedule_expression
+}
+
+resource "aws_cloudwatch_event_target" "lambda" {
+  rule = aws_cloudwatch_event_rule.schedule.name
+  arn  = aws_lambda_function.this.arn
+}
+
+resource "aws_lambda_permission" "eventbridge_invoke" {
+  statement_id  = "AllowEventBridgeInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.this.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.schedule.arn
 }

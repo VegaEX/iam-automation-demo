@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from clients.github_client import GitHubClient
 from clients.okta_client import DEPARTMENT_GROUP_MAP, OktaClient
 from clients.secret_store import get_secret
+from clients.slack_client import SlackClient
+from issue_format import format_issue_body, format_slack_message
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -131,11 +133,9 @@ def run_access_review():
     return report
 
 
-def _format_issue_body(report):
+def _format_technical_details(report):
     lines = [
-        f"Automated access review checked {report['users_checked']} active user(s) as of "
-        f"{report['checked_at']} and found {len(report['mismatched_users'])} group "
-        f"mismatch(es) and {len(report['stale_users'])} stale account(s).",
+        f"Checked {report['users_checked']} active user(s) as of {report['checked_at']}.",
         "",
     ]
 
@@ -164,12 +164,25 @@ def _format_issue_body(report):
             lines.append(f"| {s['user_id']} | {s['email']} | {last_login} | {s['days_since_login']} |")
         lines.append("")
 
-    lines.append(
-        "Review each finding and either correct the user's group membership or "
-        "department in the HR system, or deactivate the account if it's no "
-        "longer needed."
-    )
     return "\n".join(lines)
+
+
+def _format_issue_body(report):
+    return format_issue_body(
+        what_happened=(
+            "Some Okta user accounts have group memberships that don't match "
+            "their department, or haven't been used in a long time. These may "
+            "be misconfigured or no longer needed."
+        ),
+        what_needs_to_happen=[
+            "Review each finding in the technical details below.",
+            "For group mismatches, correct the user's group membership or "
+            "department in the HR system.",
+            "For stale accounts, deactivate them if they're no longer needed, "
+            "or confirm they're still in active use.",
+        ],
+        technical_details=_format_technical_details(report),
+    )
 
 
 def _open_findings_issue(report):
@@ -177,7 +190,7 @@ def _open_findings_issue(report):
         token=get_secret(os.environ["GITHUB_TOKEN_PARAM_NAME"]),
         repo=os.environ["GITHUB_REPO"],
     )
-    github.create_issue(
+    issue = github.create_issue(
         title="Access review findings — manual review required",
         body=_format_issue_body(report),
     )
@@ -190,6 +203,20 @@ def _open_findings_issue(report):
                 }
             }
         )
+    )
+
+    slack = SlackClient(webhook_url=get_secret(os.environ["SLACK_WEBHOOK_PARAM_NAME"]))
+    slack.post_alert(
+        channel=os.environ.get("SLACK_ALERTS_CHANNEL", "#iam-alerts"),
+        message=format_slack_message(
+            summary=(
+                f"Access review found {len(report['mismatched_users'])} group "
+                f"mismatch(es) and {len(report['stale_users'])} stale account(s)."
+            ),
+            action="Review needed: check the issue for the affected accounts.",
+            issue_url=issue["html_url"],
+        ),
+        severity="warning",
     )
 
 

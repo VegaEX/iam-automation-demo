@@ -30,6 +30,7 @@ def _groups(*names):
 def _set_required_env(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN_PARAM_NAME", "/iam-demo/github-token")
     monkeypatch.setenv("GITHUB_REPO", "acme-corp/iam-automation-demo")
+    monkeypatch.setenv("SLACK_WEBHOOK_PARAM_NAME", "/iam-demo/slack-webhook")
 
 
 def _run_with_mocks(monkeypatch, users, groups_by_user_id):
@@ -37,10 +38,16 @@ def _run_with_mocks(monkeypatch, users, groups_by_user_id):
 
     with patch.object(access_review, "OktaClient") as mock_okta_cls, patch.object(
         access_review, "GitHubClient"
-    ) as mock_gh_cls, patch.object(access_review, "get_secret", return_value="dummy-secret"):
+    ) as mock_gh_cls, patch.object(access_review, "SlackClient"), patch.object(
+        access_review, "get_secret", return_value="dummy-secret"
+    ):
         mock_okta = mock_okta_cls.return_value
         mock_okta.list_active_users.return_value = users
         mock_okta.get_user_groups.side_effect = lambda user_id: groups_by_user_id.get(user_id, [])
+        mock_gh_cls.return_value.create_issue.return_value = {
+            "number": 1,
+            "html_url": "https://github.com/acme-corp/iam-automation-demo/issues/1",
+        }
 
         report = access_review.run_access_review()
 

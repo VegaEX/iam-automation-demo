@@ -15,10 +15,9 @@ def _ssm():
     return _ssm_client
 
 
-def get_open_escalations(parameter_name):
-    """Return the list of open-escalation records stored at this SSM
-    parameter (plain String, not a secret), or an empty list if the
-    parameter doesn't exist yet."""
+def get_json_list(parameter_name):
+    """Return the JSON list stored at this SSM parameter (plain String, not
+    a secret), or an empty list if the parameter doesn't exist yet."""
     try:
         response = _ssm().get_parameter(Name=parameter_name)
     except _ssm().exceptions.ParameterNotFound:
@@ -26,11 +25,18 @@ def get_open_escalations(parameter_name):
     return json.loads(response["Parameter"]["Value"])
 
 
-def put_open_escalations(parameter_name, records):
-    """Overwrite the open-escalations list at this SSM parameter."""
+def put_json_list(parameter_name, records):
+    """Overwrite the JSON list stored at this SSM parameter."""
     _ssm().put_parameter(
         Name=parameter_name,
         Value=json.dumps(records),
         Type="String",
         Overwrite=True,
     )
+
+
+# Named aliases for the open-escalations use case specifically - same
+# generic list storage as above, kept as their own names at call sites
+# since "get_open_escalations" reads clearer there than "get_json_list".
+get_open_escalations = get_json_list
+put_open_escalations = put_json_list

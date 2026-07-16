@@ -101,6 +101,15 @@ module "okta_drift_auditor" {
   # lambda-drift-auditor/ available relative to this module).
 }
 
+module "scheduled_removal" {
+  source = "./modules/scheduled_removal"
+  count  = var.enable_aws_resources ? 1 : 0
+
+  okta_org_name = var.okta_org_name
+  okta_base_url = var.okta_base_url
+  github_repo   = var.github_repo
+}
+
 module "cloudwatch_dashboard" {
   source = "./modules/cloudwatch_dashboard"
   count  = var.enable_aws_resources ? 1 : 0
