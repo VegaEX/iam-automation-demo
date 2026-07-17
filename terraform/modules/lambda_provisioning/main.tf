@@ -92,6 +92,8 @@ resource "aws_lambda_function" "this" {
       OKTA_ORG_NAME             = var.okta_org_name
       OKTA_BASE_URL             = var.okta_base_url
       OKTA_API_TOKEN_PARAM_NAME = var.okta_api_token_ssm_param_name
+      GITHUB_TOKEN_PARAM_NAME   = var.github_token_param_name
+      GITHUB_REPO               = var.github_repo
     }
   }
 

@@ -50,6 +50,11 @@ variable "github_token_param_name" {
   default     = "/iam-demo/github-token"
 }
 
+variable "github_repo" {
+  description = "owner/repo that schema_validator.py opens \"ADP payload contains unmapped fields\" issues against, passed through as an environment variable."
+  type        = string
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log group retention, in days."
   type        = number
