@@ -37,22 +37,25 @@ resource "aws_iam_role_policy" "cloudwatch_logs" {
   })
 }
 
-# Lets the function read its own Okta API token from SSM at invocation time
-# so it can call the Okta API - the token's value never appears in a
-# Terraform-managed environment variable or in Terraform state, only its
-# parameter name does (set below).
-resource "aws_iam_role_policy" "okta_token_read" {
-  name = "${var.function_name}-okta-token-read"
+# Lets the function read its Okta API token and GitHub token from SSM at
+# invocation time - the tokens' values never appear in a Terraform-managed
+# environment variable or in Terraform state, only their parameter names do
+# (set below).
+resource "aws_iam_role_policy" "secrets_ssm_read" {
+  name = "${var.function_name}-secrets-read"
   role = aws_iam_role.lambda_exec.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "ReadOktaTokenParameter"
-        Effect   = "Allow"
-        Action   = ["ssm:GetParameter"]
-        Resource = "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.okta_api_token_ssm_param_name}"
+        Sid    = "ReadSecretParameters"
+        Effect = "Allow"
+        Action = ["ssm:GetParameter"]
+        Resource = [
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.okta_api_token_ssm_param_name}",
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter${var.github_token_param_name}",
+        ]
       },
       {
         # SSM SecureString parameters under the default AWS-managed key are
@@ -89,6 +92,8 @@ resource "aws_lambda_function" "this" {
       OKTA_ORG_NAME             = var.okta_org_name
       OKTA_BASE_URL             = var.okta_base_url
       OKTA_API_TOKEN_PARAM_NAME = var.okta_api_token_ssm_param_name
+      GITHUB_TOKEN_PARAM_NAME   = var.github_token_param_name
+      GITHUB_REPO               = var.github_repo
     }
   }
 

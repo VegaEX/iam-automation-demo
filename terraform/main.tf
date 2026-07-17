@@ -58,8 +58,10 @@ module "lambda_provisioning" {
   source = "./modules/lambda_provisioning"
   count  = var.enable_aws_resources ? 1 : 0
 
-  okta_org_name = var.okta_org_name
-  okta_base_url = var.okta_base_url
+  okta_org_name           = var.okta_org_name
+  okta_base_url           = var.okta_base_url
+  github_token_param_name = var.github_token_param_name
+  github_repo             = var.github_repo
 }
 
 module "api_gateway" {

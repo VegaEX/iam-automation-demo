@@ -212,6 +212,30 @@ drift if you don't know the group rules are supposed to do this.
 6. Result: two CloudWatch log entries recording exactly what happened, and
    **no GitHub issue** — this was the system working as designed.
 
+### A second "expected" path, easy to conflate with the first
+
+The provisioning Lambda's `OktaClient.assign_to_groups()`
+(`lambda/src/clients/okta_client.py`) *also* puts new hires straight into
+`eng-base`/`ops-base` via a direct Groups API call, as a belt-and-suspenders
+measure so the group shows up immediately rather than waiting on the rule
+engine above to notice the just-created user's `department` attribute. It's
+easy to assume this lands in the same `approved_hr_pattern` bucket as the
+manager-reassignment example, since the end result — the user ends up in the
+right group — looks identical. It doesn't:
+
+- The rule engine's group changes are logged with `actor.type == "System"` →
+  `approved_hr_pattern`.
+- The provisioning Lambda's direct API call is authenticated with its own
+  Okta API token, so it's logged as an `SSWS` actor → `approved_automation`
+  (matched via `KNOWN_AUTOMATION_ACTOR_IDS`, not the actor-type check).
+
+Both are expected, and both are silent (no GitHub issue), but for different
+reasons — one because Okta itself made the change, the other because a
+known piece of *our* automation did. A brand-new hire in `eng-base` can
+legitimately produce *two* separate `group.user_membership.add` events in
+the System Log this way (one from each path), both approved, neither
+flagged.
+
 **Contrast this with an actual incident:** an IT admin, working from a
 support ticket, manually drags Priya into `ops-base` in the Okta console
 directly — but nobody has actually updated her `department` attribute in

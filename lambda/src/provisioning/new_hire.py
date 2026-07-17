@@ -2,6 +2,7 @@ import json
 import logging
 import os
 
+from clients.okta_client import OktaClient
 from schema_validator import SchemaValidator, ValidationError
 
 logger = logging.getLogger()
@@ -34,7 +35,22 @@ def process_new_hire(payload):
         )
         raise
 
-    # TODO: not yet implemented - create/activate the Okta user from
-    # result.normalized_payload (see clients/okta_client.py) and assign
-    # group membership based on department/employment_type.
-    return result
+    normalized = result.normalized_payload
+
+    okta = OktaClient()
+    user_id = okta.create_user(normalized)
+    okta.activate_user(user_id)
+    okta.assign_to_groups(user_id, normalized["department"])
+
+    logger.info(
+        json.dumps(
+            {
+                "new_hire_provisioned": {
+                    "employee_id": normalized["employee_id"],
+                    "okta_user_id": user_id,
+                }
+            }
+        )
+    )
+
+    return {"okta_user_id": user_id, "validation_result": result}

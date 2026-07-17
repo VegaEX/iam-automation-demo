@@ -28,10 +28,39 @@ different angles:
         │  has ssm:GetParameter on /iam-automation-demo/okta/api_token only -
         │  the token's value never appears in Terraform config, state, or a
         │  plain Lambda environment variable)
+        │
+        ├── new-hire payload (provisioning/new_hire.py):
+        │     1. validate + normalize against adp_schema.json
+        │        (schema_validator.py) - a bad payload logs a structured
+        │        error and re-raises before any Okta call is made, so the
+        │        Lambda returns 400 and the event lands in the DLQ instead
+        │        of silently provisioning a user from garbage data
+        │     2. create_user()   - Okta user created in STAGED status,
+        │        profile mapped from adp_schema.json's okta_attribute map
+        │     3. activate_user() - STAGED -> ACTIVE
+        │     4. assign_to_groups(department) - all-staff, plus eng-base/
+        │        ops-base if the department maps to one (Okta's own dynamic
+        │        group rules react to the same department attribute
+        │        independently - see the note below)
+        │
+        └── termination payload (provisioning/termination.py):
+              1. deactivate_user(email) - looks the user up by email first;
+                 not found is logged as a warning and returns cleanly, not
+                 an error (the account may already be gone)
+              2. remove_from_all_groups() - every group except Okta's
+                 built-in Everyone group
         ▼
   Okta org   (Okta Users & Groups API)
-      - creates/activates or deactivates the user
-      - adds/removes group membership directly
+      - any non-2xx response from Okta is logged (endpoint, status code,
+        response body) and re-raised - same fail-loud contract as a
+        validation failure: Lambda returns 500, event goes to the DLQ
+
+Note: assign_to_groups() and Okta's own department-driven dynamic group
+rules (terraform/modules/okta_groups) both react to the same new hire,
+independently - one via a direct API call, one via Okta's rule engine. The
+drift auditor doesn't see this as a conflict; see docs/drift-detection.md
+for why both paths land in different "expected" buckets rather than one
+looking like drift.
 
 
 2) DECLARATIVE BASELINE  (Terraform, CI/CD)

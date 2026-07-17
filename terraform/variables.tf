@@ -29,8 +29,14 @@ variable "environment" {
 }
 
 variable "github_repo" {
-  description = "owner/repo (e.g. \"jangus/iam-automation-demo\") that the okta-drift-auditor Lambda opens \"Manual Okta change detected\" issues against."
+  description = "owner/repo (e.g. \"jangus/iam-automation-demo\") that the okta-drift-auditor Lambda opens \"Manual Okta change detected\" issues against, and that the provisioning Lambda opens \"ADP payload contains unmapped fields\" issues against."
   type        = string
+}
+
+variable "github_token_param_name" {
+  description = "Name of the SSM SecureString parameter holding a GitHub PAT with issues:write, used by the provisioning Lambda's schema_validator.py to open an issue when an ADP payload contains unmapped fields. Terraform only references the name, never the value - the parameter must already exist (created out-of-band)."
+  type        = string
+  default     = "/iam-demo/github-token"
 }
 
 variable "enable_aws_resources" {
