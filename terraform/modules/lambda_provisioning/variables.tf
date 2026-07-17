@@ -44,6 +44,12 @@ variable "okta_api_token_ssm_param_name" {
   default     = "/iam-automation-demo/okta/api_token"
 }
 
+variable "github_token_param_name" {
+  description = "Name of the SSM SecureString parameter holding a GitHub PAT with issues:write, used by schema_validator.py to open an issue when an ADP payload contains unmapped fields. Same out-of-band-creation rule as the Okta token above - Terraform only references the name, never the value."
+  type        = string
+  default     = "/iam-demo/github-token"
+}
+
 variable "log_retention_days" {
   description = "CloudWatch log group retention, in days."
   type        = number
