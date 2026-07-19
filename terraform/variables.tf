@@ -50,3 +50,9 @@ variable "known_automation_actor_ids" {
   type        = string
   default     = ""
 }
+
+variable "access_review_function_name" {
+  description = "Name of the access-review Lambda function (lambda/src/access_review.py), used to label its CloudWatch dashboard widgets. No Terraform module deploys this Lambda yet - see docs/architecture.md - so this is just the name the dashboard expects once one does."
+  type        = string
+  default     = "okta-access-review"
+}

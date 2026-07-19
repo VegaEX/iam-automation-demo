@@ -1,6 +1,6 @@
 # IAM Automation Demo
 
-A working demo of IAM-as-code for Okta. Terraform owns the declarative baseline (groups, dynamic group rules, app assignments, policies), a Lambda handles real-time HR provisioning events, GitHub Actions and Terraform Cloud run the CI/CD pipeline, and a second Lambda plus a scheduled workflow continuously verify that the live Okta org matches what's declared — and that any change that doesn't match came from an authorized source.
+A working demo of IAM-as-code for Okta. Terraform owns the declarative baseline (groups, dynamic group rules, app assignments, policies), a Lambda handles real-time HR provisioning events, GitHub Actions and Terraform Cloud run the CI/CD pipeline, a second Lambda plus a scheduled workflow continuously verify that the live Okta org matches what's declared, and a third Lambda periodically audits every active user for group/department mismatches and stale access.
 
 See `docs/architecture.md` for the full system diagram and `docs/drift-detection.md` for a deep dive on the drift governance loop.
 
@@ -10,6 +10,7 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - Event-driven provisioning (HR system → API Gateway → Lambda → Okta) kept separate from, but consistent with, the Terraform-managed baseline.
 - A real CI/CD pipeline for infrastructure: plan-on-PR with a posted plan comment, apply-on-merge, and a remote Terraform Cloud backend.
 - Two complementary drift detection approaches: whether live state still matches config, and whether every change to a managed resource came from an authorized actor.
+- A periodic access review that catches what event-driven drift detection can't: accounts nobody actively changed, but that have quietly become wrong or stale over time.
 
 ## Components
 
@@ -22,7 +23,9 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 | `terraform/modules/lambda_provisioning` | Provisioning Lambda function + IAM execution role (CloudWatch Logs, SSM read for the Okta token). |
 | `terraform/modules/api_gateway` | HTTP API with a `POST /provision` route wired to the provisioning Lambda. |
 | `terraform/modules/okta_drift_auditor` | `okta-drift-auditor` Lambda + IAM execution role (CloudWatch Logs, SSM read for both secrets) + a 15-minute EventBridge schedule. |
+| `terraform/modules/cloudwatch_dashboard` | A single `aws_cloudwatch_dashboard` covering all three Lambdas' invocations/errors/duration, plus three custom-metric widgets nothing publishes to yet (see Implementation status). |
 | `lambda/` | Provisioning Lambda (new-hire/termination webhook handler). Implemented and unit-tested: ADP payload validation/normalization (`schema_validator.py`), an `OktaClient` (`clients/okta_client.py`) that creates/activates/assigns users on hire and deactivates/unassigns them on termination, all secrets fetched from SSM at runtime. |
+| `lambda/src/access_review.py` | Standalone module (also a Lambda handler): fetches every active Okta user, flags group-membership/department mismatches and stale accounts (no login in 90+ days, or never logged in and created 7+ days ago), logs the full report, and opens a GitHub issue when there's anything to review. Implemented and unit-tested; no Terraform module deploys it yet. |
 | `lambda-drift-auditor/` | Polls the Okta System Log every 15 minutes, classifies who made each change, logs to CloudWatch, and opens a GitHub issue for anything unexpected. Fully implemented and unit-tested; secrets are fetched from SSM at runtime, never held in plain env vars. |
 | `.github/workflows/terraform-plan.yml` | On every PR to `main`: `fmt -check`, `validate`, `plan`, plan output posted as a PR comment. |
 | `.github/workflows/terraform-apply.yml` | On every push to `main`: `apply -auto-approve`. |
@@ -38,7 +41,11 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - **Done:** AWS-side Terraform — `modules/lambda_provisioning` (Lambda + execution role), `modules/api_gateway` (HTTP API, `POST /provision`), and `modules/okta_drift_auditor` (Lambda + execution role + 15-minute EventBridge schedule) are all wired into the root module and validate cleanly (`terraform validate`).
 - **Done:** Provisioning Lambda (`lambda/`) — `schema_validator.py` validates and normalizes every ADP payload before anything else touches Okta; `clients/okta_client.py` creates/activates/assigns new hires to groups and deactivates/unassigns terminated users, with all Okta API errors logged and re-raised. Unit-tested (`pytest` in `lambda/tests/`).
 - **Done:** `modules/lambda_provisioning`'s IAM role now grants `ssm:GetParameter`/`kms:Decrypt` for both the Okta token and a GitHub token (`github_token_param_name`, default `/iam-demo/github-token`), and `GITHUB_TOKEN_PARAM_NAME`/`GITHUB_REPO` are wired through as environment variables - so `schema_validator.py`'s unknown-field GitHub issue path is no longer just tested in isolation, it's actually deployable.
-- **Not yet done:** an actual `terraform apply` of the AWS resources. All three AWS modules are gated behind `enable_aws_resources` (default `false`, so the Okta-only config applies with no AWS credentials at all) — flipping it to `true` also needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
+- **Done:** `lambda/src/access_review.py` — fetches active users via a new `OktaClient.list_active_users()` (paginated) and `get_user_groups()`, cross-checks group membership against the `department` profile attribute using the same `DEPARTMENT_GROUP_MAP` the provisioning Lambda uses, flags stale accounts, logs the full report, and opens a `GitHub` issue when there's anything to review. Unit-tested (`pytest` in `lambda/tests/test_access_review.py`).
+- **Done:** `terraform/modules/cloudwatch_dashboard` — one dashboard, nine widgets, wired into root `main.tf` behind `enable_aws_resources`.
+- **Known gap:** the dashboard's three custom-metric widgets (access review findings count, failed ADP validations, orphaned account age) reference a `IAMAutomationDemo` CloudWatch namespace that nothing publishes to yet - no code in this repo calls `put_metric_data`. The widgets are real and will render once something does; until then they'll show no data.
+- **Known gap:** `access_review.py` has no Terraform module deploying it (no Lambda resource, no IAM role, no schedule) - it's real, tested Python with nowhere to run yet. The dashboard's `access_review_lambda_function_name` variable (default `okta-access-review`) just names the function its widgets expect, in advance of that module existing.
+- **Not yet done:** an actual `terraform apply` of the AWS resources. All AWS modules are gated behind `enable_aws_resources` (default `false`, so the Okta-only config applies with no AWS credentials at all) — flipping it to `true` also needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
 
 ## Setup from scratch
 
@@ -56,8 +63,8 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 
 5. **Push to `main` or open a PR.** Plan runs on every PR, apply runs on merge, drift check runs daily at 08:00 UTC.
 
-6. **Lambda deployment** (`modules/lambda_provisioning`, `modules/api_gateway`, `modules/okta_drift_auditor`) is opt-in and needs a few things the Okta-only setup above doesn't:
-   - Set `enable_aws_resources = true` in `terraform.tfvars` — it defaults to `false`, so none of these three modules are created (all gated with `count = var.enable_aws_resources ? 1 : 0`) until you flip it.
+6. **Lambda deployment** (`modules/lambda_provisioning`, `modules/api_gateway`, `modules/okta_drift_auditor`, `modules/cloudwatch_dashboard`) is opt-in and needs a few things the Okta-only setup above doesn't:
+   - Set `enable_aws_resources = true` in `terraform.tfvars` — it defaults to `false`, so none of these four modules are created (all gated with `count = var.enable_aws_resources ? 1 : 0`) until you flip it. Note the dashboard's widgets for `access_review_function_name` (default `okta-access-review`) will render with no data until that Lambda actually exists - see the Access review section below.
    - AWS credentials for Terraform's `aws` provider (the default credential chain — environment variables, shared config, or an IAM role — works as-is).
    - Build the deployment zips first: `lambda/build.sh` and `lambda-drift-auditor/build.sh` each install dependencies and produce the `.zip` the corresponding Terraform module points at (`filebase64sha256` on a missing zip fails `plan`, not just `apply`).
    - Create the two secrets **in SSM directly** before ever applying — Terraform only ever references their *names*, never their values, so it can't create them for you:
@@ -82,3 +89,28 @@ Two independent checks run continuously, answering different questions:
 - Anyone else (a human changing a managed resource directly) → **escalated**, opening a "Manual Okta change detected — review required" issue with who, what, and when.
 
 Every event that reaches classification gets a structured CloudWatch log entry regardless of outcome — full audit trail, including the changes that needed no action.
+
+## Access review: the check the other two can't do
+
+Both drift checks above only fire off a *change* - a plan diff or a System Log
+event. Some problems never produce either: an employee transferred
+departments six months ago and their group membership just never got
+updated, or an account nobody has touched (or logged into) in months is
+still sitting there active. Nothing "changed" recently enough for the other
+two loops to notice.
+
+`lambda/src/access_review.py` closes that gap by not waiting for a change at
+all - it periodically pulls every active user and checks their *current
+state* directly:
+
+- **Group/department mismatches**: a user in `eng-base` whose `department`
+  isn't `"Engineering"` (and the reverse - `"Engineering"` but not in
+  `eng-base`), same for `ops-base`/`"Operations"`.
+- **Stale access**: no login in 90+ days, or never logged in and the account
+  is more than 7 days old.
+
+Every run logs the full report to CloudWatch regardless of findings, and
+opens a **"Access review findings — manual review required"** GitHub issue
+(with a Markdown table of every mismatch/stale account) only when there's
+something to act on - same shape as the other two loops' escalation paths,
+just checking state instead of watching for events.

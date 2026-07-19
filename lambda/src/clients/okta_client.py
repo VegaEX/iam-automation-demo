@@ -66,9 +66,12 @@ class OktaClient:
             "Content-Type": "application/json",
         }
 
-    def _request(self, method, path, allow_404=False, **kwargs):
-        url = f"{self.base_url}{path}"
-        response = requests.request(method, url, headers=self._headers(), timeout=10, **kwargs)
+    def _request(self, method, path=None, url=None, allow_404=False, **kwargs):
+        endpoint = path or url
+        request_url = url or f"{self.base_url}{path}"
+        response = requests.request(
+            method, request_url, headers=self._headers(), timeout=10, **kwargs
+        )
 
         if allow_404 and response.status_code == 404:
             return None
@@ -78,14 +81,14 @@ class OktaClient:
                 json.dumps(
                     {
                         "okta_api_error": {
-                            "endpoint": path,
+                            "endpoint": endpoint,
                             "status_code": response.status_code,
                             "response_body": response.text[:1000],
                         }
                     }
                 )
             )
-            raise OktaApiError(path, response.status_code, response.text)
+            raise OktaApiError(endpoint, response.status_code, response.text)
 
         return response
 
@@ -162,10 +165,8 @@ class OktaClient:
     def remove_from_all_groups(self, user_id):
         """Remove a user from every group except Okta's built-in Everyone
         group, which can't be left directly."""
-        response = self._request("GET", f"/api/v1/users/{user_id}/groups")
-
         removed = []
-        for group in response.json():
+        for group in self.get_user_groups(user_id):
             if group.get("type") == "BUILT_IN":
                 continue
             group_id = group["id"]
@@ -173,6 +174,27 @@ class OktaClient:
             removed.append(group.get("profile", {}).get("name", group_id))
 
         return removed
+
+    def get_user_groups(self, user_id):
+        """Return the raw list of group objects a user currently belongs to."""
+        response = self._request("GET", f"/api/v1/users/{user_id}/groups")
+        return response.json()
+
+    def list_active_users(self):
+        """Return every user with status ACTIVE, following pagination
+        (Link: rel="next") to completion."""
+        response = self._request(
+            "GET", "/api/v1/users", params={"filter": 'status eq "ACTIVE"', "limit": 200}
+        )
+        users = list(response.json())
+
+        next_url = response.links.get("next", {}).get("url")
+        while next_url:
+            response = self._request("GET", url=next_url)
+            users.extend(response.json())
+            next_url = response.links.get("next", {}).get("url")
+
+        return users
 
     def _find_user_by_email(self, email):
         path = f"/api/v1/users/{quote(email, safe='')}"

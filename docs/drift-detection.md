@@ -258,3 +258,12 @@ like `terraform/main.tf` says it should. That's still `terraform plan`'s job
 (Type 1, above) and the out-of-band group audit's job (Type 2, above) — this
 Lambda is a faster, identity-aware complement to both, not a replacement for
 either.
+
+There's a fourth check in this project that's easy to lump in with the above
+but isn't actually more drift detection: `lambda/src/access_review.py`
+audits every active user's *current* group membership and login recency on
+a schedule, with no "before" state and no triggering event at all — it's
+built to catch what accumulates quietly over time (a stale transfer, an
+account nobody's touched in months) rather than anything that just changed.
+See `docs/architecture.md`'s "Why access review is a different kind of
+check, not a third drift path" for the full reasoning.
