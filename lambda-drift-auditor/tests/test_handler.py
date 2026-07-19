@@ -14,6 +14,7 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("OKTA_API_TOKEN_PARAM_NAME", "/iam-automation-demo/okta/api_token")
     monkeypatch.setenv("GITHUB_TOKEN_PARAM_NAME", "/iam-automation-demo/github/token")
     monkeypatch.setenv("GITHUB_REPO", "acme/iam-automation-demo")
+    monkeypatch.setenv("SLACK_WEBHOOK_URL_PARAM_NAME", "/iam-automation-demo/slack/webhook_url")
     monkeypatch.setenv(
         "MANAGED_RESOURCE_IDS_JSON",
         json.dumps({"group_ids": {"eng-base": "00gtracked"}}),
@@ -21,7 +22,7 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("KNOWN_AUTOMATION_ACTOR_IDS", "00tautomation")
 
 
-def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
+def test_manual_change_to_managed_resource_opens_issue_and_posts_to_slack(monkeypatch):
     _set_required_env(monkeypatch)
 
     manual_event = {
@@ -34,9 +35,12 @@ def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
 
     with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
         handler, "GitHubClient"
-    ) as mock_gh_cls, patch.object(handler, "get_secret", return_value="dummy-secret"):
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ):
         mock_okta_cls.return_value.get_events_since.return_value = [manual_event]
         mock_gh = mock_gh_cls.return_value
+        mock_slack = mock_slack_cls.return_value
 
         results = handler.handler({}, None)
 
@@ -46,8 +50,14 @@ def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
         assert kwargs["title"] == "Manual Okta change detected — review required"
         assert "Jane Admin" in kwargs["body"]
 
+        mock_slack.post_alert.assert_called_once()
+        _, slack_kwargs = mock_slack.post_alert.call_args
+        assert slack_kwargs["severity"] == "warning"
+        assert "Jane Admin" in slack_kwargs["message"]
+        assert "eng-base" in slack_kwargs["message"]
 
-def test_automation_change_is_approved_without_issue(monkeypatch):
+
+def test_automation_change_is_approved_without_issue_or_slack(monkeypatch):
     _set_required_env(monkeypatch)
 
     automation_event = {
@@ -60,14 +70,18 @@ def test_automation_change_is_approved_without_issue(monkeypatch):
 
     with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
         handler, "GitHubClient"
-    ) as mock_gh_cls, patch.object(handler, "get_secret", return_value="dummy-secret"):
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ):
         mock_okta_cls.return_value.get_events_since.return_value = [automation_event]
         mock_gh = mock_gh_cls.return_value
+        mock_slack = mock_slack_cls.return_value
 
         results = handler.handler({}, None)
 
         assert results == {"approved": 1, "escalated": 0, "ignored": 0}
         mock_gh.create_issue.assert_not_called()
+        mock_slack.post_alert.assert_not_called()
 
 
 def test_change_to_unmanaged_resource_is_ignored(monkeypatch):
@@ -83,11 +97,15 @@ def test_change_to_unmanaged_resource_is_ignored(monkeypatch):
 
     with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
         handler, "GitHubClient"
-    ) as mock_gh_cls, patch.object(handler, "get_secret", return_value="dummy-secret"):
+    ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
+        handler, "get_secret", return_value="dummy-secret"
+    ):
         mock_okta_cls.return_value.get_events_since.return_value = [unrelated_event]
         mock_gh = mock_gh_cls.return_value
+        mock_slack = mock_slack_cls.return_value
 
         results = handler.handler({}, None)
 
         assert results == {"approved": 0, "escalated": 0, "ignored": 1}
         mock_gh.create_issue.assert_not_called()
+        mock_slack.post_alert.assert_not_called()

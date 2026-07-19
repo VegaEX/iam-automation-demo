@@ -8,6 +8,7 @@ from github_client import GitHubClient
 from managed_resources import load_managed_resource_ids
 from okta_log_client import OktaLogClient
 from secret_store import get_secret
+from slack_client import SlackClient
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -45,6 +46,8 @@ def handler(event, context):
         token=get_secret(os.environ["GITHUB_TOKEN_PARAM_NAME"]),
         repo=os.environ["GITHUB_REPO"],
     )
+    slack = SlackClient(webhook_url=get_secret(os.environ["SLACK_WEBHOOK_URL_PARAM_NAME"]))
+    slack_channel = os.environ.get("SLACK_ALERTS_CHANNEL", "#iam-alerts")
     managed_ids = load_managed_resource_ids()
 
     all_events = okta_logs.get_events_since(since)
@@ -83,6 +86,15 @@ def handler(event, context):
         github.create_issue(
             title="Manual Okta change detected — review required",
             body=_format_issue_body(log_event, log_entry),
+        )
+        slack.post_alert(
+            channel=slack_channel,
+            message=(
+                f"Manual Okta change detected: {log_entry['actor']} "
+                f"({log_entry['actor_type']}) changed {', '.join(log_entry['targets'])} "
+                f"at {log_entry['event_time']}. See the GitHub issue for details."
+            ),
+            severity="warning",
         )
 
     logger.info(json.dumps({"drift_audit_summary": results}))

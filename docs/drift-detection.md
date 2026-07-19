@@ -184,9 +184,12 @@ Each event's actor gets classified into exactly one bucket:
 - `manual_review_required` → the Lambda calls the GitHub Issues API and opens
   an issue titled **"Manual Okta change detected — review required"**,
   containing the event type, timestamp, actor, target(s), outcome, and the
-  raw System Log event for debugging. A human now decides whether to revert
-  the change (bring Okta back to match Terraform) or import it (bring
-  Terraform's config up to match what actually happened).
+  raw System Log event for debugging - and separately posts a Slack alert
+  (`#iam-alerts`, warning severity, via `slack_client.py`) with the same
+  who/what/when, so escalations get noticed without anyone having to be
+  watching GitHub. A human now decides whether to revert the change (bring
+  Okta back to match Terraform) or import it (bring Terraform's config up
+  to match what actually happened).
 
 ### Worked example: the manager reassignment scenario
 

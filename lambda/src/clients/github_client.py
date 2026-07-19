@@ -21,3 +21,14 @@ class GitHubClient:
         )
         response.raise_for_status()
         return response.json()
+
+    def add_comment(self, issue_number, body):
+        url = f"https://api.github.com/repos/{self.repo}/issues/{issue_number}/comments"
+        response = requests.post(
+            url,
+            headers=self.headers,
+            json={"body": body},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()

@@ -4,7 +4,9 @@ This project has four moving parts that all touch the same Okta org from
 different angles:
 
 1. A **real-time provisioning path** — Workday pushes new-hire/termination
-   events, a Lambda acts on them immediately.
+   events, a Lambda acts on them immediately. Termination fans out into a
+   multi-app offboarding sequence with its own scheduled follow-up Lambda
+   (see the diagram and the "Offboarding" section of the README).
 2. A **declarative baseline** — Terraform owns the org's groups, group rules,
    app assignments, and policies as code, applied through GitHub Actions.
 3. A **drift governance loop** — a second Lambda and a scheduled GitHub Action
@@ -48,11 +50,28 @@ different angles:
         │        independently - see the note below)
         │
         └── termination payload (provisioning/termination.py):
-              1. deactivate_user(email) - looks the user up by email first;
-                 not found is logged as a warning and returns cleanly, not
-                 an error (the account may already be gone)
-              2. remove_from_all_groups() - every group except Okta's
-                 built-in Everyone group
+              1. okta.initiate_offboarding(email, manager_email) - security
+                 first, all of this before anything else runs: deactivate,
+                 clear_sessions() (kills active sessions + OAuth tokens),
+                 rename_username() -> "<original>_deactivated",
+                 move_to_holding_group() -> pending_removal (removed from
+                 every other group in the same step). Not found is logged
+                 as a warning and returns cleanly, not an error.
+              2. offboarding_manager.run_offboarding() - reads
+                 offboarding_config.json and, per app:
+                   - slack: no-op, note that SCIM (Okta group removal,
+                     already done in step 1) deprovisions it automatically
+                   - google_workspace: GoogleWorkspaceClient sequence -
+                     delegate_inbox -> rename_account -> transfer_drive ->
+                     create_hidden_group -> schedule_deletion(30 days)
+                     (mocked - no real Workspace credentials in this demo)
+                   - github / salesforce / atlassian: collected as manual
+                     checklist items, nothing automated
+              3. opens "Offboarding checklist — [name]" on GitHub (done
+                 actions, manual items with instructions, data-review
+                 deadline, final removal date) and appends
+                 {email, manager_email, removal_date, issue_number} to an
+                 SSM-stored pending-removals list
         ▼
   Okta org   (Okta Users & Groups API)
       - any non-2xx response from Okta is logged (endpoint, status code,
@@ -65,6 +84,25 @@ independently - one via a direct API call, one via Okta's rule engine. The
 drift auditor doesn't see this as a conflict; see docs/drift-detection.md
 for why both paths land in different "expected" buckets rather than one
 looking like drift.
+
+
+1b) SCHEDULED REMOVAL  (daily, follows up on the termination flow above)
+──────────────────────────────────────────────────────────────────────
+
+  (no trigger shown here - no Terraform module schedules this Lambda yet)
+        │
+        ▼
+  Lambda: scheduled_removal  (lambda/src/scheduled_removal.py)
+        │
+        │  reads the pending-removals list offboarding_manager.py wrote
+        ▼
+  for each {email, manager_email, removal_date, issue_number}:
+      - removal_date in the future -> log days remaining, leave it in the list
+      - removal_date has passed -> okta.permanently_delete_user(email),
+        comment on the original checklist issue, drop it from the list
+        │
+        ▼
+  SSM pending-removals list rewritten with only the still-waiting records
 
 
 2) DECLARATIVE BASELINE  (Terraform, CI/CD)
@@ -119,7 +157,8 @@ looking like drift.
         │                                                               │
         │      5. always: structured JSON log entry -> CloudWatch Logs  │
         │      6. on escalation: open a GitHub Issue                    │
-        │         "Manual Okta change detected — review required"       │
+        │         "Manual Okta change detected — review required" AND   │
+        │         post a Slack alert (#iam-alerts, warning severity)    │
         │                                                               │
         └─── slow path: daily at 08:00 UTC ─────────────────────────────┘
              GitHub Actions: terraform-drift.yml
@@ -212,14 +251,20 @@ correct right now."
 |--------------------------------------------|------------------------------------|
 | User lifecycle (create/deactivate)         | `lambda/` provisioning Lambda      |
 | Group/group-rule/app-assignment/policy config | Terraform (`terraform/`)        |
+| `pending_removal` holding group             | Terraform (`terraform/main.tf`'s `okta_groups` module) creates it; `okta_client.py` manages its membership imperatively, not a dynamic rule |
+| Multi-app offboarding sequencing            | `lambda/src/offboarding_manager.py`, driven by `offboarding_config.json` |
+| Mocked Google Workspace actions             | `lambda/src/clients/google_workspace_client.py` (no real credentials in this demo) |
+| Scheduled permanent deletion + issue follow-up | `lambda/src/scheduled_removal.py` (no deploying Terraform module yet) |
 | Provisioning Lambda + its HTTP trigger     | `terraform/modules/lambda_provisioning`, `terraform/modules/api_gateway` |
 | Drift auditor Lambda + its schedule        | `terraform/modules/okta_drift_auditor` |
 | Terraform state                            | Terraform Cloud (`jangus-iam-demo`)|
 | CI/CD for the above                        | GitHub Actions                     |
-| Secret values (Okta token, GitHub token)   | SSM Parameter Store (SecureString) — created out-of-band, never in Terraform config/state; each Lambda's IAM role can read only the parameter(s) it needs |
+| Secret values (Okta token, GitHub token, Slack webhook) | SSM Parameter Store (SecureString) — created out-of-band, never in Terraform config/state; each Lambda's IAM role can read only the parameter(s) it needs |
+| Pending-removal state (not a secret)        | SSM Parameter Store (plain String) — read *and written* by `offboarding_manager.py`/`scheduled_removal.py` |
 | "Was this change authorized?" audit        | `lambda-drift-auditor/`            |
 | "Does reality match config?" audit         | `terraform-drift.yml`              |
 | "Is everything still correct right now?" audit | `lambda/src/access_review.py` (no deploying Terraform module yet) |
+| Slack alerting                              | `lambda/src/clients/slack_client.py`, `lambda-drift-auditor/src/slack_client.py` (two copies, one per deployed package) |
 | Dashboards for all of the above            | `terraform/modules/cloudwatch_dashboard` |
 
 ## Observability

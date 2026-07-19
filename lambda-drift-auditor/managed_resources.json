@@ -3,7 +3,8 @@
     "eng-base": "00g1e2n3g4b5a6s7e8f9",
     "ops-base": "00g1o2p3s4b5a6s7e8f9",
     "it-base": "00g1i2t3b4a5s6e7f8g9",
-    "all-staff": "00g1a2l3l4s5t6a7f8f9"
+    "all-staff": "00g1a2l3l4s5t6a7f8f9",
+    "pending_removal": "00g1p2e3n4d5r6e7m8v9"
   },
   "app_ids": {
     "Acme Slack Workspace": "0oa1s2l3a4c5k6w7o8r9",
