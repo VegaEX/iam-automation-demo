@@ -1,6 +1,6 @@
 # Architecture
 
-This project has three moving parts that all touch the same Okta org from
+This project has four moving parts that all touch the same Okta org from
 different angles:
 
 1. A **real-time provisioning path** — Workday pushes new-hire/termination
@@ -10,6 +10,10 @@ different angles:
 3. A **drift governance loop** — a second Lambda and a scheduled GitHub Action
    both watch for the baseline and the real world falling out of sync, from
    two different angles (see the note at the end of this doc).
+4. A **periodic access review** — a third Lambda that doesn't wait for a
+   change at all; it directly audits every active user's current group
+   membership and login recency on a schedule (see the note at the end of
+   this doc for how this differs from the drift checks above).
 
 ```
 1) NEW HIRE / TERMINATION FLOW  (event-driven, real-time)
@@ -123,6 +127,40 @@ looking like drift.
                2. exit code 2 (changes found) -> open a GitHub Issue
                   "Drift detected in Okta infrastructure",
                   full plan output attached
+
+
+4) ACCESS REVIEW  (periodic, state-based - not event-driven)
+──────────────────────────────────────────────────────────────────────
+
+  (no trigger shown here - no Terraform module schedules this Lambda yet;
+   see the "Known gap" in the README)
+        │
+        ▼
+  Lambda: access_review  (lambda/src/access_review.py)
+        │
+        │  reads its Okta token from SSM, same as the other two Lambdas
+        ▼
+  okta.list_active_users()   (paginated GET /api/v1/users, ACTIVE only)
+        │
+        │  for each user: okta.get_user_groups(user_id)
+        ▼
+      1. group/department cross-check (DEPARTMENT_GROUP_MAP, shared with
+         the provisioning Lambda's assign_to_groups()):
+           - in eng-base but department != "Engineering" -> flag
+           - department == "Engineering" but not in eng-base -> flag
+           - same pair, ops-base / "Operations"
+      2. stale-access check:
+           - lastLogin more than 90 days ago -> flag
+           - never logged in AND created more than 7 days ago -> flag
+        │
+        ▼
+  structured report -> CloudWatch Logs (always, every run)
+        │
+        │  only if mismatches or stale accounts were found
+        ▼
+  GitHub Issue: "Access review findings — manual review required"
+      (Markdown table: user id, email, current groups, expected group,
+       reason - and separately, user id, email, last login, days since login)
 ```
 
 ## Why two drift-detection paths, not one
@@ -147,6 +185,27 @@ A manual group edit gets caught almost immediately by the auditor Lambda
 (what it actually changed). See `docs/drift-detection.md` for the full
 detect → log → evaluate → resolve/escalate story, including a worked example.
 
+## Why access review is a different kind of check, not a third drift path
+
+Both checks above are triggered by a *change*: a plan diff, or a System Log
+event. `access_review.py` isn't - it has no "before" to compare against. It
+directly inspects current state (every active user's group membership and
+login recency) and flags internal inconsistencies that may have built up
+gradually with no single change ever having triggered either drift check:
+
+- A user transferred from Engineering to Sales six months ago. Their
+  `department` attribute changed then (which `okta-drift-auditor` would have
+  seen and approved as an HR-driven pattern, if Sales had a mapped group -
+  it doesn't). Nobody ever removed them from `eng-base`, and no further
+  "change" has happened since to catch it.
+- An account has simply sat unused for 91 days. There's no event here at
+  all - staleness is a fact about elapsed time, not a change to detect.
+
+Because of that, access review runs at its own cadence, is expected to *find
+things* that have been true for a while, and answers a question the other
+two structurally can't: not "did anything change," but "is everything still
+correct right now."
+
 ## Resource ownership
 
 | Concern                                   | Owned by                          |
@@ -160,3 +219,18 @@ detect → log → evaluate → resolve/escalate story, including a worked examp
 | Secret values (Okta token, GitHub token)   | SSM Parameter Store (SecureString) — created out-of-band, never in Terraform config/state; each Lambda's IAM role can read only the parameter(s) it needs |
 | "Was this change authorized?" audit        | `lambda-drift-auditor/`            |
 | "Does reality match config?" audit         | `terraform-drift.yml`              |
+| "Is everything still correct right now?" audit | `lambda/src/access_review.py` (no deploying Terraform module yet) |
+| Dashboards for all of the above            | `terraform/modules/cloudwatch_dashboard` |
+
+## Observability
+
+`terraform/modules/cloudwatch_dashboard` builds one `aws_cloudwatch_dashboard`
+with nine widgets: invocations/errors/error-rate/p50-p95-duration for the
+provisioning Lambda, invocations/errors/a "ran in the last 15 minutes"
+single-value widget for the drift auditor, invocations for the access review
+Lambda, and three custom-metric widgets (access review findings count,
+failed ADP validations, orphaned account age) under an `IAMAutomationDemo`
+namespace. All three custom-metric widgets are real Terraform, wired up in
+advance of anything actually publishing to them - no code in this repo calls
+`put_metric_data` yet, so those three will render with no data until
+something does.

@@ -86,3 +86,13 @@ module "okta_drift_auditor" {
   # via file() here (Terraform Cloud's remote runners don't have
   # lambda-drift-auditor/ available relative to this module).
 }
+
+module "cloudwatch_dashboard" {
+  source = "./modules/cloudwatch_dashboard"
+  count  = var.enable_aws_resources ? 1 : 0
+
+  aws_region                         = var.aws_region
+  provisioning_lambda_function_name  = module.lambda_provisioning[0].function_name
+  drift_auditor_lambda_function_name = module.okta_drift_auditor[0].function_name
+  access_review_lambda_function_name = var.access_review_function_name
+}
