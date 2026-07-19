@@ -1,0 +1,32 @@
+{
+  "slack": {
+    "action": "deprovision_via_scim",
+    "timing": "immediate",
+    "ownership_transfer": false,
+    "hold_days": null
+  },
+  "google_workspace": {
+    "action": "delegate_to_manager",
+    "timing": "immediate",
+    "ownership_transfer": true,
+    "hold_days": 30
+  },
+  "github": {
+    "action": "remove_org_membership",
+    "timing": "immediate",
+    "ownership_transfer": "manual_checklist",
+    "hold_days": null
+  },
+  "salesforce": {
+    "action": "deactivate",
+    "timing": "immediate",
+    "ownership_transfer": "manual_checklist",
+    "hold_days": null
+  },
+  "atlassian": {
+    "action": "deactivate",
+    "timing": "immediate",
+    "ownership_transfer": "manual_checklist",
+    "hold_days": null
+  }
+}

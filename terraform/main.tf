@@ -6,6 +6,7 @@ module "okta_groups" {
     { name = "ops-base", description = "Baseline access group for Operations/IT staff" },
     { name = "it-base", description = "IT department base access group" },
     { name = "all-staff", description = "Automatic membership for every active employee" },
+    { name = "pending_removal", description = "Holding group for terminated users awaiting permanent deletion" },
   ]
 
   group_rules = [

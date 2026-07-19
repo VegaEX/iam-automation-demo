@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
 import requests
@@ -27,6 +28,13 @@ DEPARTMENT_GROUP_MAP = {
     "Operations": "ops-base",
 }
 ALL_STAFF_GROUP = "all-staff"
+
+# Terminated users land here instead of being removed from every group
+# outright - it's a real Terraform-managed group (see
+# terraform/modules/okta_groups) that scheduled_removal.py's daily sweep
+# treats as "awaiting permanent deletion."
+HOLDING_GROUP_NAME = "pending_removal"
+DEFAULT_OFFBOARDING_HOLD_DAYS = 30
 
 
 class OktaApiError(Exception):
@@ -179,6 +187,108 @@ class OktaClient:
         """Return the raw list of group objects a user currently belongs to."""
         response = self._request("GET", f"/api/v1/users/{user_id}/groups")
         return response.json()
+
+    def clear_sessions(self, user_id):
+        """Immediately invalidate every active Okta session for a user, and
+        revoke any OAuth/OIDC tokens issued to them, so a deactivation can't
+        be outrun by an already-open session."""
+        self._request(
+            "DELETE", f"/api/v1/users/{user_id}/sessions", params={"oauthTokens": "true"}
+        )
+
+    def rename_username(self, user_id, original_login):
+        """Rename a user's login to `<original>_deactivated`, freeing the
+        original username/address up for reuse without deleting the
+        account outright. Returns the new login."""
+        new_login = f"{original_login}_deactivated"
+        self._request("POST", f"/api/v1/users/{user_id}", json={"profile": {"login": new_login}})
+        return new_login
+
+    def move_to_holding_group(self, user_id, holding_group_name=HOLDING_GROUP_NAME):
+        """Remove a user from every group except Okta's built-in Everyone
+        group and the holding group, and ensure they're a member of the
+        holding group. Returns the list of group names removed from."""
+        holding_group_id = self._find_group_id_by_name(holding_group_name)
+        if holding_group_id is None:
+            logger.warning(
+                json.dumps(
+                    {"okta_group_not_found": {"group_name": holding_group_name, "user_id": user_id}}
+                )
+            )
+        else:
+            self._request("PUT", f"/api/v1/groups/{holding_group_id}/users/{user_id}")
+
+        removed = []
+        for group in self.get_user_groups(user_id):
+            group_name = group.get("profile", {}).get("name")
+            if group.get("type") == "BUILT_IN" or group_name == holding_group_name:
+                continue
+            group_id = group["id"]
+            self._request("DELETE", f"/api/v1/groups/{group_id}/users/{user_id}")
+            removed.append(group_name or group_id)
+
+        return removed
+
+    def permanently_delete_user(self, email):
+        """Permanently delete an already-deactivated user by email. Okta
+        requires DELETE to be called on a DEACTIVATED user to actually erase
+        the account, rather than merely deactivating it. Returns the
+        deleted user's ID, or None if no user with that email exists
+        (already gone is not an error)."""
+        user = self._find_user_by_email(email)
+        if user is None:
+            return None
+
+        user_id = user["id"]
+        self._request("DELETE", f"/api/v1/users/{user_id}")
+        return user_id
+
+    def initiate_offboarding(self, email, manager_email, hold_days=DEFAULT_OFFBOARDING_HOLD_DAYS):
+        """Immediately cut Okta access for a departing user - deactivate,
+        clear every active session, rename their login, and move them into
+        the pending_removal holding group. This is the "security first"
+        step that must complete before anything else in the offboarding
+        flow (per-app actions, the manager checklist issue) runs.
+
+        Returns None if no user with that email exists - a missing user is
+        not an error for the termination flow to raise on, just a no-op to
+        log and move past, same contract as deactivate_user.
+        """
+        user = self._find_user_by_email(email)
+        if user is None:
+            return None
+
+        user_id = user["id"]
+        original_login = user.get("profile", {}).get("login", email)
+
+        self._request("POST", f"/api/v1/users/{user_id}/lifecycle/deactivate")
+        self.clear_sessions(user_id)
+        new_login = self.rename_username(user_id, original_login)
+        self.move_to_holding_group(user_id)
+
+        removal_date = (datetime.now(timezone.utc) + timedelta(days=hold_days)).date().isoformat()
+        timestamp = datetime.now(timezone.utc).isoformat()
+
+        logger.info(
+            json.dumps(
+                {
+                    "offboarding_initiated": {
+                        "user_id": user_id,
+                        "employee_email": email,
+                        "manager_email": manager_email,
+                        "timestamp": timestamp,
+                        "removal_date": removal_date,
+                    }
+                }
+            )
+        )
+
+        return {
+            "user_id": user_id,
+            "original_login": original_login,
+            "new_login": new_login,
+            "removal_date": removal_date,
+        }
 
     def list_active_users(self):
         """Return every user with status ACTIVE, following pagination

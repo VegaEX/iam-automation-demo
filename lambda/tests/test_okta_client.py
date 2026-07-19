@@ -2,6 +2,7 @@ import json
 import os
 import sys
 from unittest.mock import MagicMock, patch
+from urllib.parse import quote
 
 import pytest
 
@@ -184,3 +185,131 @@ def test_remove_from_all_groups_skips_built_in(monkeypatch):
         assert len(delete_calls) == 1
         assert "everyone-id" not in delete_calls[0][1]
         assert "eng-id" in delete_calls[0][1]
+
+
+def test_initiate_offboarding_full_sequence(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    base_url = "https://test-org.okta.com"
+    user_id = "00u1"
+    email = "ada@acme-corp.example"
+    encoded_email = quote(email, safe="")
+
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        if method == "GET" and url == f"{base_url}/api/v1/users/{encoded_email}":
+            return _fake_response(200, {"id": user_id, "profile": {"login": email}})
+        if method == "POST" and url == f"{base_url}/api/v1/users/{user_id}/lifecycle/deactivate":
+            return _fake_response(200, {})
+        if method == "DELETE" and url == f"{base_url}/api/v1/users/{user_id}/sessions":
+            return _fake_response(204, {})
+        if method == "POST" and url == f"{base_url}/api/v1/users/{user_id}":
+            return _fake_response(200, {})
+        if method == "GET" and url == f"{base_url}/api/v1/groups":
+            return _fake_response(
+                200, [{"id": "grp-pending", "profile": {"name": "pending_removal"}}]
+            )
+        if method == "PUT" and url == f"{base_url}/api/v1/groups/grp-pending/users/{user_id}":
+            return _fake_response(204, {})
+        if method == "GET" and url == f"{base_url}/api/v1/users/{user_id}/groups":
+            return _fake_response(
+                200,
+                [
+                    {"id": "grp-pending", "type": "OKTA_GROUP", "profile": {"name": "pending_removal"}},
+                    {"id": "grp-eng", "type": "OKTA_GROUP", "profile": {"name": "eng-base"}},
+                ],
+            )
+        if method == "DELETE" and url == f"{base_url}/api/v1/groups/grp-eng/users/{user_id}":
+            return _fake_response(204, {})
+        raise AssertionError(f"unexpected request: {method} {url}")
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request", side_effect=fake_request
+    ):
+        client = OktaClient()
+        result = client.initiate_offboarding(email, "manager@acme-corp.example")
+
+        assert result["user_id"] == user_id
+        assert result["original_login"] == email
+        assert result["new_login"] == f"{email}_deactivated"
+        assert result["removal_date"] is not None
+
+
+def test_initiate_offboarding_user_not_found_returns_none(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request"
+    ) as mock_request:
+        mock_request.return_value = _fake_response(404, {}, text="Not found")
+
+        client = OktaClient()
+        result = client.initiate_offboarding("ghost@acme-corp.example", "manager@acme-corp.example")
+
+        assert result is None
+
+
+def test_move_to_holding_group_adds_to_pending_removal_and_removes_others(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    base_url = "https://test-org.okta.com"
+    user_id = "00u123"
+
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        if method == "GET" and url == f"{base_url}/api/v1/groups":
+            return _fake_response(
+                200, [{"id": "grp-pending", "profile": {"name": "pending_removal"}}]
+            )
+        if method == "PUT" and url == f"{base_url}/api/v1/groups/grp-pending/users/{user_id}":
+            return _fake_response(204, {})
+        if method == "GET" and url == f"{base_url}/api/v1/users/{user_id}/groups":
+            return _fake_response(
+                200,
+                [
+                    {"id": "grp-pending", "type": "OKTA_GROUP", "profile": {"name": "pending_removal"}},
+                    {"id": "grp-ops", "type": "OKTA_GROUP", "profile": {"name": "ops-base"}},
+                    {"id": "everyone-id", "type": "BUILT_IN", "profile": {"name": "Everyone"}},
+                ],
+            )
+        if method == "DELETE" and url == f"{base_url}/api/v1/groups/grp-ops/users/{user_id}":
+            return _fake_response(204, {})
+        raise AssertionError(f"unexpected request: {method} {url}")
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request", side_effect=fake_request
+    ):
+        client = OktaClient()
+        removed = client.move_to_holding_group(user_id)
+
+        assert removed == ["ops-base"]
+
+
+def test_permanently_delete_user_calls_delete_and_returns_id(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    def fake_request(method, url, headers=None, timeout=None, **kwargs):
+        if method == "GET":
+            return _fake_response(200, {"id": "00u1"})
+        assert method == "DELETE"
+        return _fake_response(204, {})
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request", side_effect=fake_request
+    ):
+        client = OktaClient()
+        result = client.permanently_delete_user("ada@acme-corp.example")
+
+        assert result == "00u1"
+
+
+def test_permanently_delete_user_not_found_returns_none(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request"
+    ) as mock_request:
+        mock_request.return_value = _fake_response(404, {}, text="Not found")
+
+        client = OktaClient()
+        result = client.permanently_delete_user("ghost@acme-corp.example")
+
+        assert result is None
