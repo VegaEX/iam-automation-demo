@@ -67,6 +67,30 @@ variable "github_repo" {
   type        = string
 }
 
+variable "slack_webhook_url_param_name" {
+  description = "Name of the SSM SecureString parameter holding the Slack incoming webhook URL used for #iam-alerts. Terraform only references the name, never the value - same out-of-band-creation rule as the other secrets. Used by both the main handler (escalation alerts) and the escalation-check function (unacknowledged reminders)."
+  type        = string
+  default     = "/iam-demo/slack/webhook-url"
+}
+
+variable "slack_alerts_channel" {
+  description = "Slack channel both entry points post alerts to."
+  type        = string
+  default     = "#iam-alerts"
+}
+
+variable "open_escalations_param_name" {
+  description = "Name of the SSM parameter (plain String, not a secret) storing the JSON list of escalation issues opened but not yet confirmed closed. Written by the main handler when it escalates, read and rewritten by the escalation-check function on each run."
+  type        = string
+  default     = "/iam-demo/drift-auditor/open-escalations"
+}
+
+variable "escalation_check_schedule_expression" {
+  description = "EventBridge schedule expression for the escalation-check function."
+  type        = string
+  default     = "rate(6 hours)"
+}
+
 variable "known_automation_actor_ids" {
   description = "Comma-separated Okta actor IDs (API token IDs) treated as known automation - the provisioning Lambda's token and the Terraform/CI token - so their changes are approved without escalation. These IDs are only knowable once the tokens exist and have been observed acting in the Okta System Log, so this typically starts empty and gets filled in after first deploy."
   type        = string

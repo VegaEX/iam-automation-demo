@@ -28,6 +28,12 @@ variable "timeout" {
   default     = 30
 }
 
+variable "reserved_concurrent_executions" {
+  description = "Blast radius cap: the maximum number of concurrent invocations this function is ever allowed, regardless of incoming traffic. Also implicitly reserves this much of the account's concurrency pool for this function alone."
+  type        = number
+  default     = 10
+}
+
 variable "okta_org_name" {
   description = "Okta organization name, passed through as an environment variable."
   type        = string

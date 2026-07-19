@@ -20,18 +20,20 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 | `terraform/modules/okta_groups` | `eng-base`, `ops-base`, `it-base`, `all-staff` groups, plus dynamic group rules assigning users based on their `department` profile attribute. |
 | `terraform/modules/okta_app_assignments` | Bookmark apps (Slack, GitHub, AWS SSO, Salesforce) and group-to-app assignments. |
 | `terraform/modules/okta_policies` | MFA enrollment policy (org-wide) and an admin sign-on policy requiring MFA for `ops-base`. |
-| `terraform/modules/lambda_provisioning` | Provisioning Lambda function + IAM execution role (CloudWatch Logs, SSM read for the Okta token). |
+| `terraform/modules/okta_admin_roles` | Declarative Okta admin role grants (`okta_user_admin_roles`) from a flat `(user_email, role_type)` list, grouped into one resource per user. Starts with zero assignments - granting `SUPER_ADMIN`/`ORG_ADMIN` is high-impact, so nothing is granted until explicitly populated. Tested with `terraform test` + `mock_provider` (no real Okta user needed to validate the module's structure). |
+| `terraform/environments/dev`, `terraform/environments/prod` | Per-environment root configs - own Terraform Cloud workspace, own `backend.tf`/`variables.tf`, same modules as root `main.tf`. See "Environment promotion pattern" below. |
+| `terraform/modules/lambda_provisioning` | Provisioning Lambda function + IAM execution role (CloudWatch Logs, SSM read for the Okta token). `reserved_concurrent_executions = 10` caps blast radius regardless of incoming traffic. |
 | `terraform/modules/api_gateway` | HTTP API with a `POST /provision` route wired to the provisioning Lambda. |
-| `terraform/modules/okta_drift_auditor` | `okta-drift-auditor` Lambda + IAM execution role (CloudWatch Logs, SSM read for both secrets) + a 15-minute EventBridge schedule. |
+| `terraform/modules/okta_drift_auditor` | Two Lambdas sharing one deployment package and IAM role: `okta-drift-auditor` (15-minute schedule, the audit loop) and `okta-drift-auditor-escalation-check` (6-hour schedule, follows up on escalations nobody's acknowledged yet - see below). |
 | `terraform/modules/cloudwatch_dashboard` | A single `aws_cloudwatch_dashboard` covering all three Lambdas' invocations/errors/duration, plus three custom-metric widgets nothing publishes to yet (see Implementation status). |
-| `lambda/` | Provisioning Lambda (new-hire/termination webhook handler). Implemented and unit-tested: ADP payload validation/normalization (`schema_validator.py`), an `OktaClient` (`clients/okta_client.py`) that creates/activates/assigns new hires and, on termination, immediately deactivates/clears sessions/renames/holds the departing user before handing off to the offboarding flow below. |
+| `lambda/` | Provisioning Lambda (new-hire/termination webhook handler). Implemented and unit-tested: ADP payload validation/normalization (`schema_validator.py`), an `OktaClient` (`clients/okta_client.py`) that creates/activates/assigns new hires and, on termination, immediately deactivates/clears sessions/renames/holds the departing user before handing off to the offboarding flow below. `okta_client.py`'s `_request()` retries 429/5xx responses with exponential backoff + jitter (max 3 retries) before giving up; `handler.py` rejects any single invocation with more than 25 records outright rather than processing a runaway batch. |
 | `lambda/src/offboarding_config.json` | Per-app termination behavior: Slack (SCIM, automatic), Google Workspace (delegated to manager, automatic, 30-day hold), GitHub/Salesforce/Atlassian (manual checklist). |
 | `lambda/src/clients/google_workspace_client.py` | Mocked Google Workspace Admin SDK client (`delegate_inbox`, `rename_account`, `transfer_drive`, `create_hidden_group`, `schedule_deletion`) — no real Workspace credentials exist in this demo, so every method logs and returns a realistic mock response instead of calling a real API. |
 | `lambda/src/offboarding_manager.py` | Reads `offboarding_config.json`, dispatches each app's configured action, collects manual-checklist items, and opens the **"Offboarding checklist — [name]"** GitHub issue. Records the pending removal (email, manager, removal date, issue number) to SSM for `scheduled_removal.py` to pick up later. |
 | `lambda/src/scheduled_removal.py` | Second Lambda handler (daily EventBridge, once deployed): reads pending removals from SSM, permanently deletes any Okta user past their hold period, comments completion back on the original checklist issue, and logs days-remaining for everyone still in the window. No Terraform module deploys it yet. |
 | `lambda/src/access_review.py` | Standalone module (also a Lambda handler): fetches every active Okta user, flags group-membership/department mismatches and stale accounts (no login in 90+ days, or never logged in and created 7+ days ago), logs the full report, and opens a GitHub issue when there's anything to review. Implemented and unit-tested; no Terraform module deploys it yet. |
 | `lambda/src/clients/slack_client.py`, `lambda-drift-auditor/src/slack_client.py` | `SlackClient.post_alert(channel, message, severity)` — posts to a Slack incoming webhook with a color-coded attachment (info/warning/critical). Two copies, one per independently-deployed Lambda package, same pattern as the duplicated `github_client.py`/`secret_store.py`. |
-| `lambda-drift-auditor/` | Polls the Okta System Log every 15 minutes, classifies who made each change, logs to CloudWatch, opens a GitHub issue and posts a Slack alert for anything unexpected. Fully implemented and unit-tested; secrets are fetched from SSM at runtime, never held in plain env vars. |
+| `lambda-drift-auditor/` | `handler()` polls the Okta System Log every 15 minutes, classifies who made each change, logs to CloudWatch, opens a GitHub issue and posts a Slack alert for anything unexpected - and now also records that issue's number in SSM. `check_unacknowledged_escalations()`, a second entry point on its own 6-hour schedule, re-checks every recorded issue: closed ones drop off the list, anything still open past 24 hours gets a repeated Slack reminder. Fully implemented and unit-tested; secrets are fetched from SSM at runtime, never held in plain env vars. |
 | `.github/workflows/terraform-plan.yml` | On every PR to `main`: `fmt -check`, `validate`, `plan`, plan output posted as a PR comment. |
 | `.github/workflows/terraform-apply.yml` | On every push to `main`: `apply -auto-approve`. |
 | `.github/workflows/terraform-drift.yml` | Daily at 08:00 UTC: `terraform plan -detailed-exitcode`; opens a GitHub issue if anything has changed. |
@@ -52,8 +54,13 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - **Known gap:** `access_review.py` has no Terraform module deploying it (no Lambda resource, no IAM role, no schedule) - it's real, tested Python with nowhere to run yet. The dashboard's `access_review_lambda_function_name` variable (default `okta-access-review`) just names the function its widgets expect, in advance of that module existing.
 - **Done:** the full offboarding expansion - `offboarding_config.json`, `google_workspace_client.py`, `offboarding_manager.py`, the rewired `termination.py` (Okta lockdown first, then per-app actions, then the checklist issue), and `scheduled_removal.py`. 21 new/updated tests across `lambda/tests/`, all passing.
 - **Done:** Slack alerting - `slack_client.py` (duplicated into both Lambda packages, same pattern as the other shared clients) and the drift auditor now posts to Slack alongside its GitHub issue on every escalation.
-- **Known gap:** none of this new AWS-side plumbing is wired into Terraform yet. Specifically: `modules/lambda_provisioning`'s IAM role and environment don't grant `ssm:GetParameter`/`PutParameter` for a `PENDING_REMOVALS_PARAM_NAME` parameter (read *and* written by `offboarding_manager.py`/`scheduled_removal.py`); neither Lambda's role grants `ssm:GetParameter` for a `SLACK_WEBHOOK_URL_PARAM_NAME`; and `scheduled_removal.py`, like `access_review.py`, has no deploying Terraform module (no Lambda resource, no IAM role, no daily EventBridge schedule) at all. All of this code is real and tested against mocks - none of it can run in AWS yet.
-- **Not yet done:** an actual `terraform apply` of the AWS resources. All AWS modules are gated behind `enable_aws_resources` (default `false`, so the Okta-only config applies with no AWS credentials at all) — flipping it to `true` also needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
+- **Partially fixed:** the drift auditor's Terraform is now wired for Slack - `modules/okta_drift_auditor`'s IAM role grants `ssm:GetParameter` for `SLACK_WEBHOOK_URL_PARAM_NAME`, and both of its Lambda functions get `SLACK_WEBHOOK_URL_PARAM_NAME`/`SLACK_ALERTS_CHANNEL` as environment variables. The provisioning Lambda side is still open: `modules/lambda_provisioning`'s IAM role and environment still don't grant `ssm:GetParameter`/`PutParameter` for a `PENDING_REMOVALS_PARAM_NAME` parameter (read *and* written by `offboarding_manager.py`/`scheduled_removal.py`), and `scheduled_removal.py`, like `access_review.py`, still has no deploying Terraform module (no Lambda resource, no IAM role, no daily EventBridge schedule) at all.
+- **Done:** exponential backoff with jitter on `OktaClient._request()` - 429/5xx responses get retried up to 3 times (1s, 2s, 4s base delays + up to 500ms jitter) before raising `OktaApiError`; anything else (400/401/403/404) still raises on the first attempt, no retry. Covered by dedicated tests, including one that pins jitter to zero to assert the exact backoff sequence.
+- **Done:** blast radius protection on the provisioning Lambda - `reserved_concurrent_executions = 10` in Terraform, plus a guard in `handler.py` that rejects (structured log + raised exception) any single invocation carrying more than 25 records rather than partially processing a runaway batch. This is also the first real implementation of `handler.py` itself - it was a placeholder until this pass, dispatching a single event or a `{"records": [...]}` batch to `new_hire`/`termination` by a top-level `event_type` field.
+- **Done:** unacknowledged escalation follow-up - the drift auditor's `handler()` now records `{issue_number, title, opened_at}` to SSM on every escalation; a new `check_unacknowledged_escalations()` entry point (separate `aws_lambda_function`, same zip and role, 6-hour EventBridge schedule) re-checks each one's GitHub state and posts a Slack reminder (critical severity) for anything still open past 24 hours, repeating every 6 hours until closed.
+- **Done:** multi-environment scaffold - `terraform/environments/dev` and `terraform/environments/prod`, each a fully independent root module (own `backend.tf` pointing at its own not-yet-created Terraform Cloud workspace, own `variables.tf`, a `main.tf` calling the same modules as root). Both validate (`terraform init -backend=false && terraform validate`) since neither workspace exists yet. See "Environment promotion pattern" below.
+- **Known gap, called out on purpose:** this project only has one real Okta developer org. `environments/dev` and `environments/prod` both default `okta_org_name`/`okta_base_url` to that same org. A real dev/prod split needs either a second Okta org or clearly namespaced resource names per environment - applying both environments against the same org at the same time, unmodified, would fight over identically-named groups/apps. Documented in both environments' `variables.tf`, not hidden.
+- **Not yet done:** an actual `terraform apply` of the AWS resources. All AWS modules are gated behind `enable_aws_resources` (default `false`, so the Okta-only config applies with no AWS credentials at all) — flipping it to `true` also needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`, and now `/iam-demo/slack/webhook-url`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
 
 ## Setup from scratch
 
@@ -75,10 +82,11 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
    - Set `enable_aws_resources = true` in `terraform.tfvars` — it defaults to `false`, so none of these four modules are created (all gated with `count = var.enable_aws_resources ? 1 : 0`) until you flip it. Note the dashboard's widgets for `access_review_function_name` (default `okta-access-review`) will render with no data until that Lambda actually exists - see the Access review section below.
    - AWS credentials for Terraform's `aws` provider (the default credential chain — environment variables, shared config, or an IAM role — works as-is).
    - Build the deployment zips first: `lambda/build.sh` and `lambda-drift-auditor/build.sh` each install dependencies and produce the `.zip` the corresponding Terraform module points at (`filebase64sha256` on a missing zip fails `plan`, not just `apply`).
-   - Create the two secrets **in SSM directly** before ever applying — Terraform only ever references their *names*, never their values, so it can't create them for you:
+   - Create the secrets **in SSM directly** before ever applying — Terraform only ever references their *names*, never their values, so it can't create them for you:
      ```
      aws ssm put-parameter --name /iam-automation-demo/okta/api_token --type SecureString --value <your Okta token>
      aws ssm put-parameter --name /iam-automation-demo/github/token --type SecureString --value <a GitHub PAT with issues:write>
+     aws ssm put-parameter --name /iam-demo/slack/webhook-url --type SecureString --value <a Slack incoming webhook URL>
      ```
    - Set `github_repo` (in `terraform.tfvars`) to your real `owner/repo`.
    - Leave `known_automation_actor_ids` empty on first apply — you can't know the provisioning Lambda's or CI's Okta token actor IDs until they've actually made a call that shows up in the Okta System Log. Look those IDs up afterward and set the variable so the auditor stops flagging your own automation as manual changes.
@@ -97,6 +105,8 @@ Two independent checks run continuously, answering different questions:
 - Anyone else (a human changing a managed resource directly) → **escalated**, opening a "Manual Okta change detected — review required" issue **and** a Slack alert (`#iam-alerts`, warning severity) with who, what, and when.
 
 Every event that reaches classification gets a structured CloudWatch log entry regardless of outcome — full audit trail, including the changes that needed no action.
+
+**Escalations don't just fire and forget.** Every time `handler()` opens a "Manual Okta change" issue, it also appends `{issue_number, title, opened_at}` to an SSM-stored list. A second entry point, `check_unacknowledged_escalations()`, runs every 6 hours (its own EventBridge rule, same Lambda deployment package and IAM role): it re-checks each recorded issue's state via the GitHub API, drops anything already closed off the list, and posts a Slack reminder (critical severity, with the issue title, link, and hours-open) for anything still open past 24 hours - repeating every 6 hours for as long as it stays open. An escalation nobody looked at doesn't just sit quietly in a GitHub issue list; it starts nagging.
 
 ## Access review: the check the other two can't do
 
@@ -161,3 +171,83 @@ deployed) reads that list every day: anyone past their removal date gets
 permanently deleted from Okta and a completion comment posted back on their
 original checklist issue; everyone still inside the hold window is left
 alone, with a log entry noting how many days are left.
+
+## Admin role assignments
+
+`terraform/modules/okta_admin_roles` manages Okta administrator role grants
+(`SUPER_ADMIN`, `ORG_ADMIN`, `APP_ADMIN`, and the rest of the standard set)
+declaratively, the same way groups and policies are managed - not through
+the Okta admin console. The input is a flat list of `(user_email,
+role_type)` pairs; since the underlying `okta_user_admin_roles` resource is
+one-per-user (a list of roles, not one resource per role), the module groups
+the flat list by email before creating anything, and looks up each email's
+Okta user ID via a data source (the user must already exist - this module
+doesn't create users).
+
+It's wired into root `main.tf` with an **empty list by default** - granting
+`SUPER_ADMIN` is high-impact enough that this project doesn't want to guess
+at real admins' emails. A real plan against the actual Okta org confirms
+this: with the empty default, the module creates nothing (verified with a
+live `terraform plan`, not just `validate`). Populate `admin_assignments`
+when you're ready to manage real grants.
+
+Its role assignment IDs feed into `managed_resources.json` alongside
+groups/apps/policies, so `okta-drift-auditor` treats an out-of-band admin
+role change (someone granting themselves `SUPER_ADMIN` directly in the Okta
+console) exactly like any other unauthorized change to a Terraform-managed
+resource - logged, classified, and escalated if it wasn't the provisioning
+Lambda or CI that did it.
+
+Tested with Terraform's native test framework (`terraform test` +
+`mock_provider "okta" {}`) rather than Python - this validates the module's
+actual HCL (grouping logic, resource count, role-list contents) without
+needing a real Okta user to look up, since `mock_provider` fabricates
+placeholder values for the `data "okta_user"` lookup instead of calling the
+real API.
+
+## Environment promotion pattern
+
+`terraform/environments/dev/` and `terraform/environments/prod/` are
+separate root modules - each with its own `backend.tf` pointing at its own
+Terraform Cloud workspace (`iam-automation-demo-dev`,
+`iam-automation-demo-prod`), its own `variables.tf`, and a `main.tf` that
+calls the exact same modules as the original root `terraform/main.tf`, just
+from one directory deeper (`../../modules/...` instead of `./modules/...`).
+
+**Neither workspace has been created yet - that's a manual step.** Before
+either environment can be applied:
+
+1. Create the `iam-automation-demo-dev` and `iam-automation-demo-prod`
+   workspaces in the `jangus-iam-demo` Terraform Cloud organization (same
+   process as the original workspace - see [Setup from scratch](#setup-from-scratch)
+   step 2), using the CLI-driven workflow.
+2. Set each workspace's own variables (`okta_api_token` as sensitive,
+   `github_repo`, etc.) - they don't inherit anything from the root
+   workspace or from each other.
+3. `cd terraform/environments/dev && terraform init && terraform plan`
+   (and the equivalent for `prod`) once its workspace exists.
+
+**The intended promotion flow, once both workspaces exist:** a change lands
+in `terraform/modules/*` or in one environment's own config, gets applied to
+**dev first**, gets reviewed there (does the plan look right, does the
+change actually behave correctly against dev's Okta org), and only then
+gets applied to **prod** - the same change, promoted, not re-derived. In
+practice that means: open a PR touching the shared modules → CI plans
+against whichever workspace(s) are wired to run in CI → apply to dev →
+confirm it's correct → apply the identical, already-reviewed config to prod.
+The value of separate workspaces is that dev mistakes can't touch prod
+state, and prod never runs anything that wasn't already proven in dev first.
+
+**Honest gap, not papered over:** this demo has exactly one real Okta
+developer org, so both environments' `variables.tf` currently default
+`okta_org_name`/`okta_base_url` to that same org. Since Terraform state is
+separate per workspace but the *target Okta org* would be the same, actually
+applying both environments unmodified, at the same time, would create
+duplicate/conflicting groups and apps in that one org. A real dev/prod split
+needs either a second Okta org (the clean fix) or environment-namespaced
+resource names (e.g. `dev-eng-base` vs `eng-base`) if a second org isn't an
+option. This scaffold demonstrates the *structure* of environment
+separation - the workspaces, the backend/variable isolation, the promotion
+flow - without yet solving the "one Okta org" problem, since that requires
+either spending real money on a second org or a naming-convention change
+this pass didn't make.

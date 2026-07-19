@@ -1,5 +1,9 @@
+# Calls the same modules as the root terraform/main.tf, from one directory
+# further down - module source paths are relative to this file, hence
+# "../../modules/..." instead of "./modules/...".
+
 module "okta_groups" {
-  source = "./modules/okta_groups"
+  source = "../../modules/okta_groups"
 
   groups = [
     { name = "eng-base", description = "Baseline access group for Engineering staff" },
@@ -29,7 +33,7 @@ module "okta_groups" {
 }
 
 module "okta_app_assignments" {
-  source = "./modules/okta_app_assignments"
+  source = "../../modules/okta_app_assignments"
 
   apps = [
     { label = "Acme Slack Workspace", url = "https://acme-corp.slack.com" },
@@ -50,28 +54,25 @@ module "okta_app_assignments" {
 }
 
 module "okta_policies" {
-  source = "./modules/okta_policies"
+  source = "../../modules/okta_policies"
 
   admin_group_id = module.okta_groups.group_ids["ops-base"]
 }
 
 module "okta_admin_roles" {
-  source = "./modules/okta_admin_roles"
+  source = "../../modules/okta_admin_roles"
 
-  # Empty by default - granting SUPER_ADMIN/ORG_ADMIN is high-impact, so this
-  # starts with no real assignments rather than guessing at real admins'
-  # emails. Populate with real entries when you're ready for Terraform to
-  # manage actual admin role grants, e.g.:
-  # admin_assignments = [
-  #   { user_email = "jane@acme-corp.example", role_type = "SUPER_ADMIN" },
-  # ]
+  # Empty by default - see terraform/main.tf's module block for the same
+  # rationale. Populate per-environment once you're ready to manage real
+  # admin role grants here.
   admin_assignments = []
 }
 
 module "lambda_provisioning" {
-  source = "./modules/lambda_provisioning"
+  source = "../../modules/lambda_provisioning"
   count  = var.enable_aws_resources ? 1 : 0
 
+  function_name           = "iam-provisioning-${var.environment}"
   okta_org_name           = var.okta_org_name
   okta_base_url           = var.okta_base_url
   github_token_param_name = var.github_token_param_name
@@ -79,32 +80,32 @@ module "lambda_provisioning" {
 }
 
 module "api_gateway" {
-  source = "./modules/api_gateway"
+  source = "../../modules/api_gateway"
   count  = var.enable_aws_resources ? 1 : 0
 
+  api_name             = "iam-provisioning-api-${var.environment}"
   lambda_function_name = module.lambda_provisioning[0].function_name
   lambda_invoke_arn    = module.lambda_provisioning[0].invoke_arn
 }
 
 module "okta_drift_auditor" {
-  source = "./modules/okta_drift_auditor"
+  source = "../../modules/okta_drift_auditor"
   count  = var.enable_aws_resources ? 1 : 0
 
+  function_name              = "okta-drift-auditor-${var.environment}"
   okta_org_name              = var.okta_org_name
   okta_base_url              = var.okta_base_url
   github_repo                = var.github_repo
   known_automation_actor_ids = var.known_automation_actor_ids
-  # managed_resource_ids_json intentionally omitted - defaults to "{}".
-  # The real value is injected into the Lambda's environment variable
-  # out-of-band from `terraform output -json` after each apply, not sourced
-  # via file() here (Terraform Cloud's remote runners don't have
-  # lambda-drift-auditor/ available relative to this module).
+  # managed_resource_ids_json intentionally omitted - defaults to "{}",
+  # same reasoning as root/main.tf.
 }
 
 module "cloudwatch_dashboard" {
-  source = "./modules/cloudwatch_dashboard"
+  source = "../../modules/cloudwatch_dashboard"
   count  = var.enable_aws_resources ? 1 : 0
 
+  dashboard_name                     = "iam-automation-demo-${var.environment}"
   aws_region                         = var.aws_region
   provisioning_lambda_function_name  = module.lambda_provisioning[0].function_name
   drift_auditor_lambda_function_name = module.okta_drift_auditor[0].function_name

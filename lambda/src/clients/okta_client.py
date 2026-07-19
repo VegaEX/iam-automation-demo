@@ -1,6 +1,8 @@
 import json
 import logging
 import os
+import random
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import quote
 
@@ -12,6 +14,13 @@ logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
 DEFAULT_SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "..", "adp_schema.json")
+
+# Retry policy for _request(): only 429 (rate limit) and 5xx responses are
+# transient enough to be worth retrying - anything else (4xx like 400/401/
+# 403/404) means the request itself was wrong and retrying won't help.
+MAX_RETRIES = 3
+RETRY_BASE_DELAY_SECONDS = 1
+RETRY_JITTER_MAX_SECONDS = 0.5
 
 # eng-base/ops-base already have Terraform-managed dynamic group rules that
 # assign users by this same department attribute (see
@@ -77,14 +86,41 @@ class OktaClient:
     def _request(self, method, path=None, url=None, allow_404=False, **kwargs):
         endpoint = path or url
         request_url = url or f"{self.base_url}{path}"
-        response = requests.request(
-            method, request_url, headers=self._headers(), timeout=10, **kwargs
-        )
 
-        if allow_404 and response.status_code == 404:
-            return None
+        attempt = 0
+        while True:
+            response = requests.request(
+                method, request_url, headers=self._headers(), timeout=10, **kwargs
+            )
 
-        if not response.ok:
+            if allow_404 and response.status_code == 404:
+                return None
+
+            if response.ok:
+                return response
+
+            retryable = response.status_code == 429 or response.status_code >= 500
+            if retryable and attempt < MAX_RETRIES:
+                delay = RETRY_BASE_DELAY_SECONDS * (2**attempt) + random.uniform(
+                    0, RETRY_JITTER_MAX_SECONDS
+                )
+                logger.warning(
+                    json.dumps(
+                        {
+                            "okta_api_retry": {
+                                "endpoint": endpoint,
+                                "status_code": response.status_code,
+                                "attempt": attempt + 1,
+                                "max_retries": MAX_RETRIES,
+                                "delay_seconds": round(delay, 3),
+                            }
+                        }
+                    )
+                )
+                time.sleep(delay)
+                attempt += 1
+                continue
+
             logger.error(
                 json.dumps(
                     {
@@ -97,8 +133,6 @@ class OktaClient:
                 )
             )
             raise OktaApiError(endpoint, response.status_code, response.text)
-
-        return response
 
     def _map_profile(self, payload):
         profile = {}

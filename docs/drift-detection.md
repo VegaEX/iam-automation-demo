@@ -191,6 +191,31 @@ Each event's actor gets classified into exactly one bucket:
   Okta back to match Terraform) or import it (bring Terraform's config up
   to match what actually happened).
 
+### Step 5, six hours later: did anyone actually look?
+
+Opening the issue isn't the end of the story - an issue nobody looks at is
+exactly as useful as no issue at all. Every escalation also gets recorded
+(`{issue_number, title, opened_at}`) to an SSM-stored list. A second, entirely
+separate entry point - `check_unacknowledged_escalations()`, its own
+EventBridge schedule every 6 hours, same Lambda deployment package and IAM
+role as `handler()` - reads that list back and re-checks each issue's actual
+state via the GitHub API:
+
+- Issue already closed → acknowledged, drop it from the list. Nothing more
+  to do.
+- Issue still open, less than 24 hours old → leave it alone. Give a human a
+  reasonable window to see it first.
+- Issue still open, more than 24 hours old → post a Slack reminder (critical
+  severity this time, not warning - the title, a link straight to the issue,
+  and how many hours it's been sitting there), and leave it in the list.
+  Since this check runs every 6 hours, an escalation that's still open next
+  time gets reminded *again* - it doesn't stop nagging until someone closes
+  the issue.
+
+This is the same detect → log → evaluate → resolve/escalate shape as the
+rest of this doc, just running on the *escalation* itself as the thing being
+watched, rather than on the original Okta change.
+
 ### Worked example: the manager reassignment scenario
 
 This is the case `approved_hr_pattern` exists for — it's easy to mistake for

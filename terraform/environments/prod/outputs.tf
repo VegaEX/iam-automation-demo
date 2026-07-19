@@ -19,6 +19,6 @@ output "mfa_policy_id" {
 }
 
 output "admin_role_assignment_ids" {
-  description = "Map of user email to their okta_user_admin_roles resource ID, for feeding into the drift auditor's managed_resources.json."
+  description = "Map of user email to their okta_user_admin_roles resource ID."
   value       = module.okta_admin_roles.admin_role_assignment_ids
 }
