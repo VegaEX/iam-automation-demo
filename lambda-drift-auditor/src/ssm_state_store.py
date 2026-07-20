@@ -26,7 +26,7 @@ def get_json_list(parameter_name):
 
 
 def put_json_list(parameter_name, records):
-    """Overwrite the JSON list stored at this SSM parameter."""
+    """Overwrite the JSON list at this SSM parameter."""
     _ssm().put_parameter(
         Name=parameter_name,
         Value=json.dumps(records),
@@ -35,8 +35,8 @@ def put_json_list(parameter_name, records):
     )
 
 
-# Named aliases for the open-escalations use case specifically - same
-# generic list storage as above, kept as their own names at call sites
-# since "get_open_escalations" reads clearer there than "get_json_list".
+# Semantic aliases for the open-escalations call sites - same generic JSON
+# list storage underneath, kept as separate names since "open escalations"
+# reads more clearly than "json list" at those call sites.
 get_open_escalations = get_json_list
 put_open_escalations = put_json_list
