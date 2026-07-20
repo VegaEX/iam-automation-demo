@@ -8,6 +8,8 @@ from datetime import datetime
 
 from clients.github_client import GitHubClient
 from clients.secret_store import get_secret
+from clients.slack_client import SlackClient
+from issue_format import format_issue_body, format_slack_message
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -175,26 +177,43 @@ class SchemaValidator:
         raise ValidationError(field_name, f"unrecognized date format: {value!r}")
 
     def _report_unknown_fields(self, payload, unknown_fields):
-        body_lines = [
-            "The ADP new-hire payload below contained fields this schema doesn't recognize.",
-            "",
-            f"- **Employee ID:** {payload.get('employee_id', '(unknown)')}",
-            "- **Unmapped fields:**",
-        ]
+        technical_lines = [f"- **Employee ID:** {payload.get('employee_id', '(unknown)')}", "- **Unmapped fields:**"]
         for name in unknown_fields:
             sample_value = str(payload[name])[:50]
-            body_lines.append(f"  - `{name}`: `{sample_value}`")
-        body_lines += [
-            "",
-            "Add these to `lambda/src/adp_schema.json` (with an Okta attribute "
-            "mapping) if they're meaningful, or confirm they can be safely ignored.",
-        ]
+            technical_lines.append(f"  - `{name}`: `{sample_value}`")
+
+        body = format_issue_body(
+            what_happened=(
+                "The HR system sent an employee record with fields this project "
+                "doesn't recognize. No data was lost, but these fields aren't "
+                "being used for anything yet."
+            ),
+            what_needs_to_happen=[
+                "Review the unmapped fields listed below.",
+                "If they're meaningful, add them to `lambda/src/adp_schema.json` "
+                "with an Okta attribute mapping.",
+                "If they can be safely ignored, close this issue with a note "
+                "confirming that.",
+            ],
+            technical_details="\n".join(technical_lines),
+        )
 
         github = GitHubClient(
             token=get_secret(os.environ["GITHUB_TOKEN_PARAM_NAME"]),
             repo=os.environ["GITHUB_REPO"],
         )
-        github.create_issue(
+        issue = github.create_issue(
             title="ADP payload contains unmapped fields — schema review required",
-            body="\n".join(body_lines),
+            body=body,
+        )
+
+        slack = SlackClient(webhook_url=get_secret(os.environ["SLACK_WEBHOOK_PARAM_NAME"]))
+        slack.post_alert(
+            channel=os.environ.get("SLACK_ALERTS_CHANNEL", "#iam-alerts"),
+            message=format_slack_message(
+                summary=f"ADP sent {len(unknown_fields)} field(s) this project doesn't recognize.",
+                action="Review needed: check the issue for field names and sample values.",
+                issue_url=issue["html_url"],
+            ),
+            severity="warning",
         )

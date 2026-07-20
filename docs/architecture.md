@@ -100,7 +100,7 @@ looking like drift.
 1b) SCHEDULED REMOVAL  (daily, follows up on the termination flow above)
 ──────────────────────────────────────────────────────────────────────
 
-  (no trigger shown here - no Terraform module schedules this Lambda yet)
+  EventBridge rule (terraform/modules/scheduled_removal, rate(1 day))
         │
         ▼
   Lambda: scheduled_removal  (lambda/src/scheduled_removal.py)
@@ -110,7 +110,8 @@ looking like drift.
   for each {email, manager_email, removal_date, issue_number}:
       - removal_date in the future -> log days remaining, leave it in the list
       - removal_date has passed -> okta.permanently_delete_user(email),
-        comment on the original checklist issue, drop it from the list
+        comment on the original checklist issue, post an informational
+        Slack note, drop it from the list
         │
         ▼
   SSM pending-removals list rewritten with only the still-waiting records
@@ -173,12 +174,48 @@ looking like drift.
         │         then record {issue_number, title, opened_at} to SSM   │
         │         for the follow-up check below (3b)                   │
         │                                                               │
+        │      SAME RUN, SEPARATE CHECK — admin-privilege events        │
+        │      (not filtered by managed_resources.json - this looks     │
+        │      org-wide, regardless of whether the role is Terraform-   │
+        │      managed):                                                │
+        │      7. filter System Log events to user.account.privilege.   │
+        │         grant / user.mfa.factor.activate whose target is an   │
+        │         admin role                                            │
+        │      8. actor in KNOWN_AUTOMATION_ACTOR_IDS -> approved, log  │
+        │         only. Anyone else -> ESCALATE: "Administrator access  │
+        │         granted" GitHub issue + red/urgent Slack alert, 24h   │
+        │         response deadline, regardless of time of day          │
+        │                                                               │
         └─── slow path: daily at 08:00 UTC ─────────────────────────────┘
              GitHub Actions: terraform-drift.yml
                1. terraform plan -detailed-exitcode   (against real Okta)
                2. exit code 2 (changes found) -> open a GitHub Issue
                   "Drift detected in Okta infrastructure",
                   full plan output attached
+
+
+3c) ADMIN-ROLE-HOLDER AUDIT  (every 15 minutes, same run as 3, catches
+    grants made before this Lambda ever existed)
+──────────────────────────────────────────────────────────────────────
+
+  end of the same handler() invocation as (3) above
+        │
+        ▼
+  GET /api/v1/iam/assignees/users   (every current Okta admin-role holder,
+                                      not filtered by managed_resources.json)
+        │
+        ▼
+  for each holder's email:
+      - in KNOWN_ADMIN_EMAILS, or already recorded in the
+        REPORTED_ADMIN_ALERTS_PARAM_NAME SSM list -> skip, already known/reported
+      - otherwise -> open "Administrator access granted" GitHub issue +
+        red/urgent Slack alert (same format as 3's admin-grant path),
+        record the email to the SSM list so the next run doesn't reopen it
+        │
+        ▼
+  SSM reported-admin-alerts list rewritten with the newly-reported emails
+  added (ongoing reminders for anything still open come from 3b, since these
+  issues are recorded to the same open-escalations list)
 
 
 3b) ESCALATION FOLLOW-UP  (every 6 hours, follows up on 3's escalations)
@@ -293,13 +330,15 @@ correct right now."
 | `pending_removal` holding group             | Terraform (`terraform/main.tf`'s `okta_groups` module) creates it; `okta_client.py` manages its membership imperatively, not a dynamic rule |
 | Multi-app offboarding sequencing            | `lambda/src/offboarding_manager.py`, driven by `offboarding_config.json` |
 | Mocked Google Workspace actions             | `lambda/src/clients/google_workspace_client.py` (no real credentials in this demo) |
-| Scheduled permanent deletion + issue follow-up | `lambda/src/scheduled_removal.py` (no deploying Terraform module yet) |
+| Scheduled permanent deletion + issue follow-up | `lambda/src/scheduled_removal.py`, deployed by `terraform/modules/scheduled_removal` |
 | Provisioning Lambda + its HTTP trigger     | `terraform/modules/lambda_provisioning`, `terraform/modules/api_gateway` |
 | Drift auditor Lambda + its schedule        | `terraform/modules/okta_drift_auditor` |
+| Admin-privilege-grant detection + periodic admin-role-holder audit | `lambda-drift-auditor/src/classifier.py` (classification), `handler.py` (both the event-based and the periodic-audit path), deployed as part of `terraform/modules/okta_drift_auditor` |
 | Terraform state                            | Terraform Cloud - `jangus-iam-demo` workspace for the root config; `iam-automation-demo-dev`/`iam-automation-demo-prod` for `terraform/environments/*` (not yet created - see the README's "Environment promotion pattern") |
 | CI/CD for the above                        | GitHub Actions                     |
 | Secret values (Okta token, GitHub token, Slack webhook) | SSM Parameter Store (SecureString) — created out-of-band, never in Terraform config/state; each Lambda's IAM role can read only the parameter(s) it needs |
 | Pending-removal state (not a secret)        | SSM Parameter Store (plain String) — read *and written* by `offboarding_manager.py`/`scheduled_removal.py` |
+| Reported-admin-alerts state (not a secret)   | SSM Parameter Store (plain String) — read and written by `handler.py`'s admin-role-holder audit, so the same unresolved grant isn't re-escalated every 15-minute run |
 | "Was this change authorized?" audit        | `lambda-drift-auditor/`            |
 | "Does reality match config?" audit         | `terraform-drift.yml`              |
 | "Is everything still correct right now?" audit | `lambda/src/access_review.py` (no deploying Terraform module yet) |
