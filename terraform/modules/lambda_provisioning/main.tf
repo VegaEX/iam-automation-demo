@@ -87,6 +87,12 @@ resource "aws_lambda_function" "this" {
   filename         = var.lambda_zip_path
   source_code_hash = filebase64sha256(var.lambda_zip_path)
 
+  # Blast radius protection: caps how many concurrent invocations this
+  # function can ever have, regardless of how much traffic API Gateway
+  # forwards to it - a runaway retry storm or bulk export gone wrong can't
+  # scale this function past reserved_concurrent_executions no matter what.
+  reserved_concurrent_executions = var.reserved_concurrent_executions
+
   environment {
     variables = {
       OKTA_ORG_NAME             = var.okta_org_name

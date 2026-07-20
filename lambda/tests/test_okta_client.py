@@ -72,7 +72,7 @@ def test_create_user_api_error_raises_and_logs(monkeypatch):
 
     with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
         okta_client_module.requests, "request"
-    ) as mock_request:
+    ) as mock_request, patch.object(okta_client_module.time, "sleep") as mock_sleep:
         mock_request.return_value = _fake_response(500, {"errorSummary": "Internal Server Error"})
 
         client = OktaClient()
@@ -82,6 +82,10 @@ def test_create_user_api_error_raises_and_logs(monkeypatch):
         assert exc_info.value.status_code == 500
         assert exc_info.value.endpoint == "/api/v1/users"
         assert "Internal Server Error" in exc_info.value.response_body
+        # A 500 is retryable, so this exhausted all 3 retries (4 requests
+        # total) before finally raising.
+        assert mock_request.call_count == 4
+        assert mock_sleep.call_count == 3
 
 
 def test_assign_to_groups_maps_department_and_assigns(monkeypatch):
@@ -313,3 +317,65 @@ def test_permanently_delete_user_not_found_returns_none(monkeypatch):
         result = client.permanently_delete_user("ghost@acme-corp.example")
 
         assert result is None
+
+
+def test_request_retries_on_429_then_succeeds(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    responses = [
+        _fake_response(429, {"errorSummary": "Too Many Requests"}),
+        _fake_response(200, {"id": "00u1"}),
+    ]
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request", side_effect=responses
+    ) as mock_request, patch.object(okta_client_module.time, "sleep") as mock_sleep:
+        client = OktaClient()
+        response = client._request("DELETE", "/api/v1/users/00u1")
+
+        assert response.status_code == 200
+        assert mock_request.call_count == 2
+        mock_sleep.assert_called_once()
+        # First retry delay: base 1s * 2^0 = 1s, plus up to 500ms jitter.
+        delay = mock_sleep.call_args[0][0]
+        assert 1.0 <= delay <= 1.5
+
+
+def test_request_backoff_doubles_and_gives_up_after_max_retries(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request"
+    ) as mock_request, patch.object(okta_client_module.time, "sleep") as mock_sleep, patch.object(
+        okta_client_module.random, "uniform", return_value=0.0
+    ):
+        mock_request.return_value = _fake_response(503, {"errorSummary": "Service Unavailable"})
+
+        client = OktaClient()
+        with pytest.raises(OktaApiError) as exc_info:
+            client._request("GET", "/api/v1/users/00u1")
+
+        assert exc_info.value.status_code == 503
+        # 1 initial attempt + 3 retries = 4 requests total.
+        assert mock_request.call_count == 4
+        # Delays double starting at 1s: 1, 2, 4 (jitter fixed at 0 above).
+        delays = [call.args[0] for call in mock_sleep.call_args_list]
+        assert delays == [1.0, 2.0, 4.0]
+
+
+def test_request_non_retryable_error_raises_immediately(monkeypatch):
+    _set_required_env(monkeypatch)
+
+    with patch.object(okta_client_module, "get_secret", return_value="dummy-token"), patch.object(
+        okta_client_module.requests, "request"
+    ) as mock_request, patch.object(okta_client_module.time, "sleep") as mock_sleep:
+        mock_request.return_value = _fake_response(400, {"errorSummary": "Bad Request"})
+
+        client = OktaClient()
+        with pytest.raises(OktaApiError) as exc_info:
+            client._request("POST", "/api/v1/users")
+
+        assert exc_info.value.status_code == 400
+        # Not retryable - exactly one request, no sleeping at all.
+        assert mock_request.call_count == 1
+        mock_sleep.assert_not_called()

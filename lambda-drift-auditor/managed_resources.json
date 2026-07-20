@@ -15,5 +15,8 @@
   "policy_ids": [
     "00p1a2d3m4i5n6s7i8g9",
     "00p1c2o3r4p5m6f7a8p9"
-  ]
+  ],
+  "admin_role_assignment_ids": {
+    "admin@acme-corp.example": "00u1a2d3m4i5n6r7o8l9"
+  }
 }

@@ -1,0 +1,15 @@
+okta_org_name = "acme-corp"
+okta_base_url = "okta.com"
+
+# Real usage: do NOT put a real token in a committed file. Copy this file to
+# terraform.tfvars (gitignored) and fill in a real value there, or set
+# okta_api_token as a sensitive Terraform Cloud workspace variable on
+# iam-automation-demo-dev instead.
+okta_api_token = "00xAbCdEfGhIjKlMnOpQrStUvWxYz-example-token"
+
+aws_region  = "us-east-1"
+environment = "dev"
+
+github_repo = "acme-corp/iam-automation-demo"
+
+known_automation_actor_ids = ""

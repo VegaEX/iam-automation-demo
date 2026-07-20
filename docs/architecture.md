@@ -28,12 +28,23 @@ different angles:
   API Gateway   POST /provision   (terraform/modules/api_gateway)
         │
         ▼
-  Lambda: provisioning  (lambda/, deployed by terraform/modules/lambda_provisioning)
+  Lambda: provisioning  (lambda/, deployed by terraform/modules/lambda_provisioning,
+                         reserved_concurrent_executions=10 caps blast radius)
         │
         │  reads its Okta token from SSM at invocation time (execution role
         │  has ssm:GetParameter on /iam-automation-demo/okta/api_token only -
         │  the token's value never appears in Terraform config, state, or a
         │  plain Lambda environment variable)
+        │
+        │  handler.py rejects outright (structured log + raise, no partial
+        │  processing) any single invocation whose event carries more than
+        │  25 records - a runaway batch guard, separate from the concurrency
+        │  cap above
+        │
+        │  every Okta API call below retries 429/5xx responses with
+        │  exponential backoff + jitter (1s/2s/4s base delays, up to 3
+        │  retries) before OktaApiError gives up - anything else (4xx like
+        │  400/404) still fails on the first attempt, no retry
         │
         ├── new-hire payload (provisioning/new_hire.py):
         │     1. validate + normalize against adp_schema.json
@@ -158,7 +169,9 @@ looking like drift.
         │      5. always: structured JSON log entry -> CloudWatch Logs  │
         │      6. on escalation: open a GitHub Issue                    │
         │         "Manual Okta change detected — review required" AND   │
-        │         post a Slack alert (#iam-alerts, warning severity)    │
+        │         post a Slack alert (#iam-alerts, warning severity),   │
+        │         then record {issue_number, title, opened_at} to SSM   │
+        │         for the follow-up check below (3b)                   │
         │                                                               │
         └─── slow path: daily at 08:00 UTC ─────────────────────────────┘
              GitHub Actions: terraform-drift.yml
@@ -166,6 +179,31 @@ looking like drift.
                2. exit code 2 (changes found) -> open a GitHub Issue
                   "Drift detected in Okta infrastructure",
                   full plan output attached
+
+
+3b) ESCALATION FOLLOW-UP  (every 6 hours, follows up on 3's escalations)
+──────────────────────────────────────────────────────────────────────
+
+  EventBridge rule (terraform/modules/okta_drift_auditor, separate schedule
+  from 3's 15-minute one, same Lambda deployment package and IAM role)
+        │
+        ▼
+  Lambda: okta-drift-auditor-escalation-check
+      (handler.check_unacknowledged_escalations - a second aws_lambda_function
+       resource, since one Lambda can only run one handler)
+        │
+        │  reads the open-escalations list handler() wrote in step 6 above
+        ▼
+  for each {issue_number, title, opened_at}:
+      - github.get_issue(issue_number).state != "open" -> acknowledged,
+        drop it from the list
+      - still open, <= 24h since opened_at -> leave it, no reminder yet
+      - still open, > 24h since opened_at -> Slack reminder (critical
+        severity: issue title, link, hours open), keep it in the list -
+        repeats every 6 hours for as long as it stays open
+        │
+        ▼
+  SSM open-escalations list rewritten with only the still-open records
 
 
 4) ACCESS REVIEW  (periodic, state-based - not event-driven)
@@ -251,13 +289,14 @@ correct right now."
 |--------------------------------------------|------------------------------------|
 | User lifecycle (create/deactivate)         | `lambda/` provisioning Lambda      |
 | Group/group-rule/app-assignment/policy config | Terraform (`terraform/`)        |
+| Admin role grants (`SUPER_ADMIN`, etc.)     | `terraform/modules/okta_admin_roles` - empty by default, tracked in `managed_resources.json` once populated |
 | `pending_removal` holding group             | Terraform (`terraform/main.tf`'s `okta_groups` module) creates it; `okta_client.py` manages its membership imperatively, not a dynamic rule |
 | Multi-app offboarding sequencing            | `lambda/src/offboarding_manager.py`, driven by `offboarding_config.json` |
 | Mocked Google Workspace actions             | `lambda/src/clients/google_workspace_client.py` (no real credentials in this demo) |
 | Scheduled permanent deletion + issue follow-up | `lambda/src/scheduled_removal.py` (no deploying Terraform module yet) |
 | Provisioning Lambda + its HTTP trigger     | `terraform/modules/lambda_provisioning`, `terraform/modules/api_gateway` |
 | Drift auditor Lambda + its schedule        | `terraform/modules/okta_drift_auditor` |
-| Terraform state                            | Terraform Cloud (`jangus-iam-demo`)|
+| Terraform state                            | Terraform Cloud - `jangus-iam-demo` workspace for the root config; `iam-automation-demo-dev`/`iam-automation-demo-prod` for `terraform/environments/*` (not yet created - see the README's "Environment promotion pattern") |
 | CI/CD for the above                        | GitHub Actions                     |
 | Secret values (Okta token, GitHub token, Slack webhook) | SSM Parameter Store (SecureString) — created out-of-band, never in Terraform config/state; each Lambda's IAM role can read only the parameter(s) it needs |
 | Pending-removal state (not a secret)        | SSM Parameter Store (plain String) — read *and written* by `offboarding_manager.py`/`scheduled_removal.py` |

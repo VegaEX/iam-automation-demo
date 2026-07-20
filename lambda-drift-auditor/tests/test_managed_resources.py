@@ -27,3 +27,15 @@ def test_falls_back_to_config_file(monkeypatch, tmp_path):
     ids = load_managed_resource_ids()
 
     assert ids == {"0oaabc123"}
+
+
+def test_admin_role_assignment_ids_are_tracked_in_bundled_config(monkeypatch):
+    # No env var override - reads the real, bundled managed_resources.json,
+    # confirming okta_admin_roles's assignment IDs are wired in and actually
+    # picked up, not just present in the JSON file.
+    monkeypatch.delenv("MANAGED_RESOURCE_IDS_JSON", raising=False)
+    monkeypatch.delenv("MANAGED_RESOURCES_CONFIG_PATH", raising=False)
+
+    ids = load_managed_resource_ids()
+
+    assert "00u1a2d3m4i5n6r7o8l9" in ids

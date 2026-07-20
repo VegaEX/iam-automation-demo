@@ -9,6 +9,12 @@ from managed_resources import load_managed_resource_ids
 from okta_log_client import OktaLogClient
 from secret_store import get_secret
 from slack_client import SlackClient
+from ssm_state_store import get_open_escalations, put_open_escalations
+
+# An escalation still open after this long gets a repeated Slack nag every
+# time check_unacknowledged_escalations runs (every 6 hours - see
+# terraform/modules/okta_drift_auditor), until someone closes the issue.
+ESCALATION_REMINDER_HOURS = 24
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -83,10 +89,11 @@ def handler(event, context):
             continue
 
         results["escalated"] += 1
-        github.create_issue(
+        issue = github.create_issue(
             title="Manual Okta change detected — review required",
             body=_format_issue_body(log_event, log_entry),
         )
+        _record_open_escalation(issue)
         slack.post_alert(
             channel=slack_channel,
             message=(
@@ -99,6 +106,81 @@ def handler(event, context):
 
     logger.info(json.dumps({"drift_audit_summary": results}))
     return results
+
+
+def _record_open_escalation(issue):
+    param_name = os.environ["OPEN_ESCALATIONS_PARAM_NAME"]
+    records = get_open_escalations(param_name)
+    records.append(
+        {
+            "issue_number": issue["number"],
+            "title": issue["title"],
+            "opened_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    put_open_escalations(param_name, records)
+
+
+def check_unacknowledged_escalations(event, context):
+    """Second entry point (a separate EventBridge rule, every 6 hours - see
+    terraform/modules/okta_drift_auditor): re-checks every escalation issue
+    handler() has opened and hasn't seen closed yet. Closed issues are
+    dropped from the list; issues still open past ESCALATION_REMINDER_HOURS
+    get a Slack reminder every time this runs, until someone closes them."""
+    param_name = os.environ["OPEN_ESCALATIONS_PARAM_NAME"]
+    records = get_open_escalations(param_name)
+
+    github = GitHubClient(
+        token=get_secret(os.environ["GITHUB_TOKEN_PARAM_NAME"]),
+        repo=os.environ["GITHUB_REPO"],
+    )
+    slack = SlackClient(webhook_url=get_secret(os.environ["SLACK_WEBHOOK_URL_PARAM_NAME"]))
+    slack_channel = os.environ.get("SLACK_ALERTS_CHANNEL", "#iam-alerts")
+
+    now = datetime.now(timezone.utc)
+    still_open = []
+    reminders_sent = 0
+
+    for record in records:
+        issue = github.get_issue(record["issue_number"])
+
+        if issue["state"] != "open":
+            logger.info(
+                json.dumps({"escalation_acknowledged": {"issue_number": record["issue_number"]}})
+            )
+            continue
+
+        opened_at = datetime.fromisoformat(record["opened_at"])
+        hours_open = (now - opened_at).total_seconds() / 3600
+
+        if hours_open > ESCALATION_REMINDER_HOURS:
+            slack.post_alert(
+                channel=slack_channel,
+                message=(
+                    f"Escalation still unacknowledged after {hours_open:.1f}h: "
+                    f"\"{issue['title']}\" - {issue['html_url']}"
+                ),
+                severity="critical",
+            )
+            logger.info(
+                json.dumps(
+                    {
+                        "escalation_reminder_sent": {
+                            "issue_number": record["issue_number"],
+                            "hours_open": round(hours_open, 1),
+                        }
+                    }
+                )
+            )
+            reminders_sent += 1
+
+        still_open.append(record)
+
+    put_open_escalations(param_name, still_open)
+
+    summary = {"checked": len(records), "reminders_sent": reminders_sent, "still_open": len(still_open)}
+    logger.info(json.dumps({"escalation_check_summary": summary}))
+    return summary
 
 
 def _format_issue_body(log_event, log_entry):
