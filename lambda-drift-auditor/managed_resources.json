@@ -3,12 +3,8 @@
     "eng-base": "00g1e2n3g4b5a6s7e8f9",
     "ops-base": "00g1o2p3s4b5a6s7e8f9",
     "it-base": "00g1i2t3b4a5s6e7f8g9",
-<<<<<<< HEAD
     "all-staff": "00g1a2l3l4s5t6a7f8f9",
     "pending_removal": "00g1p2e3n4d5r6e7m8v9"
-=======
-    "all-staff": "00g1a2l3l4s5t6a7f8f9"
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
   },
   "app_ids": {
     "Acme Slack Workspace": "0oa1s2l3a4c5k6w7o8r9",
@@ -19,12 +15,8 @@
   "policy_ids": [
     "00p1a2d3m4i5n6s7i8g9",
     "00p1c2o3r4p5m6f7a8p9"
-<<<<<<< HEAD
   ],
   "admin_role_assignment_ids": {
     "admin@acme-corp.example": "00u1a2d3m4i5n6r7o8l9"
   }
-=======
-  ]
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 }

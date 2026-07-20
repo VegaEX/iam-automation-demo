@@ -1,10 +1,6 @@
 # IAM Automation Demo
 
-<<<<<<< HEAD
 A working demo of IAM-as-code for Okta. Terraform owns the declarative baseline (groups, dynamic group rules, app assignments, policies), a Lambda handles real-time HR provisioning events — including a full multi-app offboarding sequence on termination — GitHub Actions and Terraform Cloud run the CI/CD pipeline, a second Lambda plus a scheduled workflow continuously verify that the live Okta org matches what's declared, and a third Lambda periodically audits every active user for group/department mismatches and stale access.
-=======
-A working demo of IAM-as-code for Okta. Terraform owns the declarative baseline (groups, dynamic group rules, app assignments, policies), a Lambda handles real-time HR provisioning events, GitHub Actions and Terraform Cloud run the CI/CD pipeline, and a second Lambda plus a scheduled workflow continuously verify that the live Okta org matches what's declared — and that any change that doesn't match came from an authorized source.
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 See `docs/architecture.md` for the full system diagram and `docs/drift-detection.md` for a deep dive on the drift governance loop.
 
@@ -14,10 +10,7 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - Event-driven provisioning (HR system → API Gateway → Lambda → Okta) kept separate from, but consistent with, the Terraform-managed baseline.
 - A real CI/CD pipeline for infrastructure: plan-on-PR with a posted plan comment, apply-on-merge, and a remote Terraform Cloud backend.
 - Two complementary drift detection approaches: whether live state still matches config, and whether every change to a managed resource came from an authorized actor.
-<<<<<<< HEAD
 - A periodic access review that catches what event-driven drift detection can't: accounts nobody actively changed, but that have quietly become wrong or stale over time.
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 ## Components
 
@@ -27,7 +20,6 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 | `terraform/modules/okta_groups` | `eng-base`, `ops-base`, `it-base`, `all-staff` groups, plus dynamic group rules assigning users based on their `department` profile attribute. |
 | `terraform/modules/okta_app_assignments` | Bookmark apps (Slack, GitHub, AWS SSO, Salesforce) and group-to-app assignments. |
 | `terraform/modules/okta_policies` | MFA enrollment policy (org-wide) and an admin sign-on policy requiring MFA for `ops-base`. |
-<<<<<<< HEAD
 | `terraform/modules/okta_admin_roles` | Declarative Okta admin role grants (`okta_user_admin_roles`) from a flat `(user_email, role_type)` list, grouped into one resource per user. Starts with zero assignments - granting `SUPER_ADMIN`/`ORG_ADMIN` is high-impact, so nothing is granted until explicitly populated. Tested with `terraform test` + `mock_provider` (no real Okta user needed to validate the module's structure). |
 | `terraform/environments/dev`, `terraform/environments/prod` | Per-environment root configs - own Terraform Cloud workspace, own `backend.tf`/`variables.tf`, same modules as root `main.tf`. See "Environment promotion pattern" below. |
 | `terraform/modules/lambda_provisioning` | Provisioning Lambda function + IAM execution role (CloudWatch Logs, SSM read for the Okta token). `reserved_concurrent_executions = 10` caps blast radius regardless of incoming traffic. |
@@ -43,13 +35,6 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 | `lambda/src/access_review.py` | Standalone module (also a Lambda handler): fetches every active Okta user, flags group-membership/department mismatches and stale accounts (no login in 90+ days, or never logged in and created 7+ days ago), logs the full report, and opens a GitHub issue when there's anything to review. Implemented and unit-tested; no Terraform module deploys it yet. |
 | `lambda/src/clients/slack_client.py`, `lambda-drift-auditor/src/slack_client.py` | `SlackClient.post_alert(channel, message, severity)` — posts to a Slack incoming webhook with a color-coded attachment (info/warning/critical). Two copies, one per independently-deployed Lambda package, same pattern as the duplicated `github_client.py`/`secret_store.py`. |
 | `lambda-drift-auditor/` | `handler()` polls the Okta System Log every 15 minutes, classifies who made each change, logs to CloudWatch, opens a GitHub issue and posts a Slack alert for anything unexpected - and now also records that issue's number in SSM. It also classifies admin-privilege-grant events (`user.account.privilege.grant`, `user.mfa.factor.activate` against an admin-role target) separately, escalating any grant from an actor outside `KNOWN_AUTOMATION_ACTOR_IDS` immediately, and cross-checks every current Okta admin-role holder against `KNOWN_ADMIN_EMAILS` on every run - so an admin role granted before the auditor was even running still gets caught. `check_unacknowledged_escalations()`, a second entry point on its own 6-hour schedule, re-checks every recorded issue: closed ones drop off the list, anything still open past 24 hours gets a repeated Slack reminder. Fully implemented and unit-tested; secrets are fetched from SSM at runtime, never held in plain env vars. |
-=======
-| `terraform/modules/lambda_provisioning` | Provisioning Lambda function + IAM execution role (CloudWatch Logs, SSM read for the Okta token). |
-| `terraform/modules/api_gateway` | HTTP API with a `POST /provision` route wired to the provisioning Lambda. |
-| `terraform/modules/okta_drift_auditor` | `okta-drift-auditor` Lambda + IAM execution role (CloudWatch Logs, SSM read for both secrets) + a 15-minute EventBridge schedule. |
-| `lambda/` | Provisioning Lambda (new-hire/termination webhook handler). Scaffolded — Terraform will deploy it, but the handler logic itself isn't written yet. |
-| `lambda-drift-auditor/` | Polls the Okta System Log every 15 minutes, classifies who made each change, logs to CloudWatch, and opens a GitHub issue for anything unexpected. Fully implemented and unit-tested; secrets are fetched from SSM at runtime, never held in plain env vars. |
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 | `.github/workflows/terraform-plan.yml` | On every PR to `main`: `fmt -check`, `validate`, `plan`, plan output posted as a PR comment. |
 | `.github/workflows/terraform-apply.yml` | On every push to `main`: `apply -auto-approve`. |
 | `.github/workflows/terraform-drift.yml` | Daily at 08:00 UTC: `terraform plan -detailed-exitcode`; opens a GitHub issue if anything has changed. |
@@ -62,7 +47,6 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - **Done:** Terraform Cloud remote backend, all three GitHub Actions workflows.
 - **Done:** `okta-drift-auditor` Lambda — implemented and unit-tested (`pytest` in `lambda-drift-auditor/tests/`), including runtime SSM secret lookups (`secret_store.py`) instead of plain-text secret env vars.
 - **Done:** AWS-side Terraform — `modules/lambda_provisioning` (Lambda + execution role), `modules/api_gateway` (HTTP API, `POST /provision`), and `modules/okta_drift_auditor` (Lambda + execution role + 15-minute EventBridge schedule) are all wired into the root module and validate cleanly (`terraform validate`).
-<<<<<<< HEAD
 - **Done:** Provisioning Lambda (`lambda/`) — `schema_validator.py` validates and normalizes every ADP payload before anything else touches Okta; `clients/okta_client.py` creates/activates/assigns new hires to groups and deactivates/unassigns terminated users, with all Okta API errors logged and re-raised. Unit-tested (`pytest` in `lambda/tests/`).
 - **Done:** `modules/lambda_provisioning`'s IAM role now grants `ssm:GetParameter`/`kms:Decrypt` for both the Okta token and a GitHub token (`github_token_param_name`, default `/iam-demo/github-token`), and `GITHUB_TOKEN_PARAM_NAME`/`GITHUB_REPO` are wired through as environment variables - so `schema_validator.py`'s unknown-field GitHub issue path is no longer just tested in isolation, it's actually deployable.
 - **Done:** `lambda/src/access_review.py` — fetches active users via a new `OktaClient.list_active_users()` (paginated) and `get_user_groups()`, cross-checks group membership against the `department` profile attribute using the same `DEPARTMENT_GROUP_MAP` the provisioning Lambda uses, flags stale accounts, logs the full report, and opens a `GitHub` issue when there's anything to review. Unit-tested (`pytest` in `lambda/tests/test_access_review.py`).
@@ -81,10 +65,6 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 - **Known gap, called out on purpose:** this project only has one real Okta developer org. `environments/dev` and `environments/prod` both default `okta_org_name`/`okta_base_url` to that same org. A real dev/prod split needs either a second Okta org or clearly namespaced resource names per environment - applying both environments against the same org at the same time, unmodified, would fight over identically-named groups/apps. Documented in both environments' `variables.tf`, not hidden.
 - **Not yet done:** an actual `terraform apply` of the AWS resources. All AWS modules are gated behind `enable_aws_resources` (default `false`, so the Okta-only config applies with no AWS credentials at all) — flipping it to `true` also needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`, and `/iam-demo/slack-webhook`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
 - **Known gap, called out on purpose:** `access_review.py` still has no deploying Terraform module (no Lambda resource, no IAM role, no schedule) - only `scheduled_removal.py` and the admin-grant/admin-holder-audit logic (inside the already-deployed `okta_drift_auditor` module) were closed out this pass.
-=======
-- **In progress:** Provisioning Lambda (`lambda/`) — directory scaffolded, handler logic not yet written. The Terraform above will happily deploy it, but it won't do anything useful until that's implemented.
-- **Not yet done:** an actual `terraform apply` of the AWS resources. That needs real AWS credentials, a real `github_repo` value, and the SSM parameters (`/iam-automation-demo/okta/api_token`, `/iam-automation-demo/github/token`) created out-of-band first — see [Setup from scratch](#setup-from-scratch).
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 ## Setup from scratch
 
@@ -102,7 +82,6 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
 
 5. **Push to `main` or open a PR.** Plan runs on every PR, apply runs on merge, drift check runs daily at 08:00 UTC.
 
-<<<<<<< HEAD
 6. **Lambda deployment** (`modules/lambda_provisioning`, `modules/api_gateway`, `modules/okta_drift_auditor`, `modules/scheduled_removal`, `modules/cloudwatch_dashboard`) is opt-in and needs a few things the Okta-only setup above doesn't:
    - Set `enable_aws_resources = true` in `terraform.tfvars` — it defaults to `false`, so none of these four modules are created (all gated with `count = var.enable_aws_resources ? 1 : 0`) until you flip it. Note the dashboard's widgets for `access_review_function_name` (default `okta-access-review`) will render with no data until that Lambda actually exists - see the Access review section below.
    - AWS credentials for Terraform's `aws` provider (the default credential chain — environment variables, shared config, or an IAM role — works as-is).
@@ -117,18 +96,6 @@ See `docs/architecture.md` for the full system diagram and `docs/drift-detection
    - Leave `known_automation_actor_ids` empty on first apply — you can't know the provisioning Lambda's or CI's Okta token actor IDs until they've actually made a call that shows up in the Okta System Log. Look those IDs up afterward and set the variable so the auditor stops flagging your own automation as manual changes.
    - Similarly, leave `known_admin_emails` empty until you know who your real Okta admins are, then populate it (comma-separated emails) — otherwise the periodic admin-role-holder audit will open an escalation for every legitimate admin on the very first run.
    - The auditor's `MANAGED_RESOURCE_IDS_JSON` env var defaults to `"{}"` (no `file()` reference — Terraform Cloud's remote runners can't reach `lambda-drift-auditor/managed_resources.json` relative to the module path). With it empty, the auditor doesn't skip anything - it evaluates *every* group/policy/app-assignment event org-wide, not just Terraform-managed ones - so run `terraform output -json` after every apply and push the resulting resource IDs into the deployed Lambda's environment yourself to narrow it back down to what Terraform actually manages.
-=======
-6. **Lambda deployment** (`modules/lambda_provisioning`, `modules/api_gateway`, `modules/okta_drift_auditor`) needs a few things the Okta-only setup above doesn't:
-   - AWS credentials for Terraform's `aws` provider (the default credential chain — environment variables, shared config, or an IAM role — works as-is).
-   - Build the deployment zips first: `lambda/build.sh` and `lambda-drift-auditor/build.sh` each install dependencies and produce the `.zip` the corresponding Terraform module points at (`filebase64sha256` on a missing zip fails `plan`, not just `apply`).
-   - Create the two secrets **in SSM directly** before ever applying — Terraform only ever references their *names*, never their values, so it can't create them for you:
-     ```
-     aws ssm put-parameter --name /iam-automation-demo/okta/api_token --type SecureString --value <your Okta token>
-     aws ssm put-parameter --name /iam-automation-demo/github/token --type SecureString --value <a GitHub PAT with issues:write>
-     ```
-   - Set `github_repo` (in `terraform.tfvars`) to your real `owner/repo`.
-   - Leave `known_automation_actor_ids` empty on first apply — you can't know the provisioning Lambda's or CI's Okta token actor IDs until they've actually made a call that shows up in the Okta System Log. Look those IDs up afterward and set the variable so the auditor stops flagging your own automation as manual changes.
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 ## How the drift governance loop works
 
@@ -140,7 +107,6 @@ Two independent checks run continuously, answering different questions:
 
 - Known automation token (provisioning Lambda or CI) → **approved**, logged only.
 - Okta's own `System` actor (a dynamic group rule reacting to an HR-driven department change, e.g. a manager reassignment in Workday cascading to group membership) → **approved**, logged only.
-<<<<<<< HEAD
 - Anyone else (a human changing a managed resource directly) → **escalated**, opening a "Manual Okta change detected — review required" issue **and** a Slack alert (`#iam-alerts`, warning severity) with who, what, and when.
 
 Every event that reaches classification gets a structured CloudWatch log entry regardless of outcome — full audit trail, including the changes that needed no action.
@@ -296,8 +262,3 @@ separation - the workspaces, the backend/variable isolation, the promotion
 flow - without yet solving the "one Okta org" problem, since that requires
 either spending real money on a second org or a naming-convention change
 this pass didn't make.
-=======
-- Anyone else (a human changing a managed resource directly) → **escalated**, opening a "Manual Okta change detected — review required" issue with who, what, and when.
-
-Every event that reaches classification gets a structured CloudWatch log entry regardless of outcome — full audit trail, including the changes that needed no action.
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

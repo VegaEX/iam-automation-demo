@@ -12,7 +12,6 @@ output "schedule_rule_arn" {
   description = "ARN of the EventBridge rule triggering the auditor."
   value       = aws_cloudwatch_event_rule.schedule.arn
 }
-<<<<<<< HEAD
 
 output "escalation_check_function_name" {
   description = "Name of the escalation-check Lambda function."
@@ -23,5 +22,3 @@ output "escalation_check_schedule_rule_arn" {
   description = "ARN of the EventBridge rule triggering the escalation-check function."
   value       = aws_cloudwatch_event_rule.escalation_check_schedule.arn
 }
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

@@ -1,10 +1,7 @@
 import json
 import os
 import sys
-<<<<<<< HEAD
 from datetime import datetime, timedelta, timezone
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -18,7 +15,6 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv("OKTA_API_TOKEN_PARAM_NAME", "/iam-automation-demo/okta/api_token")
     monkeypatch.setenv("GITHUB_TOKEN_PARAM_NAME", "/iam-automation-demo/github/token")
     monkeypatch.setenv("GITHUB_REPO", "acme/iam-automation-demo")
-<<<<<<< HEAD
     monkeypatch.setenv("SLACK_WEBHOOK_PARAM_NAME", "/iam-demo/slack-webhook")
     monkeypatch.setenv(
         "OPEN_ESCALATIONS_PARAM_NAME", "/iam-automation-demo/drift-auditor/open-escalations"
@@ -26,23 +22,15 @@ def _set_required_env(monkeypatch):
     monkeypatch.setenv(
         "REPORTED_ADMIN_ALERTS_PARAM_NAME", "/iam-automation-demo/drift-auditor/reported-admins"
     )
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     monkeypatch.setenv(
         "MANAGED_RESOURCE_IDS_JSON",
         json.dumps({"group_ids": {"eng-base": "00gtracked"}}),
     )
     monkeypatch.setenv("KNOWN_AUTOMATION_ACTOR_IDS", "00tautomation")
-<<<<<<< HEAD
     monkeypatch.setenv("KNOWN_ADMIN_EMAILS", "")
 
 
 def test_manual_change_to_managed_resource_opens_issue_and_posts_to_slack(monkeypatch):
-=======
-
-
-def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     _set_required_env(monkeypatch)
 
     manual_event = {
@@ -55,7 +43,6 @@ def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
 
     with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
         handler, "GitHubClient"
-<<<<<<< HEAD
     ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
         handler, "get_secret", return_value="dummy-secret"
     ), patch.object(handler, "get_open_escalations", return_value=[]), patch.object(
@@ -82,21 +69,11 @@ def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
             "admin_grants_escalated": 0,
             "unexpected_admin_holders": 0,
         }
-=======
-    ) as mock_gh_cls, patch.object(handler, "get_secret", return_value="dummy-secret"):
-        mock_okta_cls.return_value.get_events_since.return_value = [manual_event]
-        mock_gh = mock_gh_cls.return_value
-
-        results = handler.handler({}, None)
-
-        assert results == {"approved": 0, "escalated": 1, "ignored": 0}
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
         mock_gh.create_issue.assert_called_once()
         _, kwargs = mock_gh.create_issue.call_args
         assert kwargs["title"] == "Manual Okta change detected — review required"
         assert "Jane Admin" in kwargs["body"]
 
-<<<<<<< HEAD
         mock_slack.post_alert.assert_called_once()
         _, slack_kwargs = mock_slack.post_alert.call_args
         assert slack_kwargs["severity"] == "warning"
@@ -110,10 +87,6 @@ def test_manual_change_to_managed_resource_opens_issue(monkeypatch):
 
 
 def test_automation_change_is_approved_without_issue_or_slack(monkeypatch):
-=======
-
-def test_automation_change_is_approved_without_issue(monkeypatch):
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     _set_required_env(monkeypatch)
 
     automation_event = {
@@ -126,7 +99,6 @@ def test_automation_change_is_approved_without_issue(monkeypatch):
 
     with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
         handler, "GitHubClient"
-<<<<<<< HEAD
     ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
         handler, "get_secret", return_value="dummy-secret"
     ), patch.object(handler, "list_admin_role_holders", return_value=[]), patch.object(
@@ -148,16 +120,6 @@ def test_automation_change_is_approved_without_issue(monkeypatch):
         }
         mock_gh.create_issue.assert_not_called()
         mock_slack.post_alert.assert_not_called()
-=======
-    ) as mock_gh_cls, patch.object(handler, "get_secret", return_value="dummy-secret"):
-        mock_okta_cls.return_value.get_events_since.return_value = [automation_event]
-        mock_gh = mock_gh_cls.return_value
-
-        results = handler.handler({}, None)
-
-        assert results == {"approved": 1, "escalated": 0, "ignored": 0}
-        mock_gh.create_issue.assert_not_called()
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 
 def test_change_to_unmanaged_resource_is_ignored(monkeypatch):
@@ -173,7 +135,6 @@ def test_change_to_unmanaged_resource_is_ignored(monkeypatch):
 
     with patch.object(handler, "OktaLogClient") as mock_okta_cls, patch.object(
         handler, "GitHubClient"
-<<<<<<< HEAD
     ) as mock_gh_cls, patch.object(handler, "SlackClient") as mock_slack_cls, patch.object(
         handler, "get_secret", return_value="dummy-secret"
     ), patch.object(handler, "list_admin_role_holders", return_value=[]), patch.object(
@@ -459,13 +420,3 @@ def test_check_unacknowledged_escalations_drops_closed_issues(monkeypatch):
         mock_slack.post_alert.assert_not_called()
         assert summary == {"checked": 1, "reminders_sent": 0, "still_open": 0}
         mock_put.assert_called_once_with(os.environ["OPEN_ESCALATIONS_PARAM_NAME"], [])
-=======
-    ) as mock_gh_cls, patch.object(handler, "get_secret", return_value="dummy-secret"):
-        mock_okta_cls.return_value.get_events_since.return_value = [unrelated_event]
-        mock_gh = mock_gh_cls.return_value
-
-        results = handler.handler({}, None)
-
-        assert results == {"approved": 0, "escalated": 0, "ignored": 1}
-        mock_gh.create_issue.assert_not_called()
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

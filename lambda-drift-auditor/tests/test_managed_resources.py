@@ -27,7 +27,6 @@ def test_falls_back_to_config_file(monkeypatch, tmp_path):
     ids = load_managed_resource_ids()
 
     assert ids == {"0oaabc123"}
-<<<<<<< HEAD
 
 
 def test_admin_role_assignment_ids_are_tracked_in_bundled_config(monkeypatch):
@@ -40,5 +39,3 @@ def test_admin_role_assignment_ids_are_tracked_in_bundled_config(monkeypatch):
     ids = load_managed_resource_ids()
 
     assert "00u1a2d3m4i5n6r7o8l9" in ids
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

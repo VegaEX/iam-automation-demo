@@ -3,7 +3,6 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
-<<<<<<< HEAD
 from classifier import (
     classify_admin_privilege_event,
     classify_event,
@@ -23,13 +22,6 @@ from ssm_state_store import get_json_list, get_open_escalations, put_json_list, 
 # time check_unacknowledged_escalations runs (every 6 hours - see
 # terraform/modules/okta_drift_auditor), until someone closes the issue.
 ESCALATION_REMINDER_HOURS = 24
-=======
-from classifier import classify_event
-from github_client import GitHubClient
-from managed_resources import load_managed_resource_ids
-from okta_log_client import OktaLogClient
-from secret_store import get_secret
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -67,16 +59,12 @@ def handler(event, context):
         token=get_secret(os.environ["GITHUB_TOKEN_PARAM_NAME"]),
         repo=os.environ["GITHUB_REPO"],
     )
-<<<<<<< HEAD
     slack = SlackClient(webhook_url=get_secret(os.environ["SLACK_WEBHOOK_PARAM_NAME"]))
     slack_channel = os.environ.get("SLACK_ALERTS_CHANNEL", "#iam-alerts")
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
     managed_ids = load_managed_resource_ids()
 
     all_events = okta_logs.get_events_since(since)
     relevant_events = [e for e in all_events if e.get("eventType") in RELEVANT_EVENT_TYPES]
-<<<<<<< HEAD
     admin_privilege_events = [e for e in all_events if is_admin_privilege_event(e)]
 
     results = {
@@ -87,10 +75,6 @@ def handler(event, context):
         "admin_grants_escalated": 0,
         "unexpected_admin_holders": 0,
     }
-=======
-
-    results = {"approved": 0, "escalated": 0, "ignored": 0}
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
     for log_event in relevant_events:
         target_ids = {t.get("id") for t in log_event.get("target", []) if t.get("id")}
@@ -120,7 +104,6 @@ def handler(event, context):
             continue
 
         results["escalated"] += 1
-<<<<<<< HEAD
         issue = github.create_issue(
             title="Manual Okta change detected — review required",
             body=_format_issue_body(log_event, log_entry),
@@ -196,18 +179,11 @@ def handler(event, context):
         slack=slack,
         slack_channel=slack_channel,
     )
-=======
-        github.create_issue(
-            title="Manual Okta change detected — review required",
-            body=_format_issue_body(log_event, log_entry),
-        )
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
     logger.info(json.dumps({"drift_audit_summary": results}))
     return results
 
 
-<<<<<<< HEAD
 def _check_unexpected_admin_holders(okta_org_url, okta_api_token, github, slack, slack_channel):
     known_emails = {
         e.strip().lower() for e in os.environ.get("KNOWN_ADMIN_EMAILS", "").split(",") if e.strip()
@@ -444,28 +420,3 @@ def _format_unexpected_admin_holder_issue_body(email, holder):
         technical_details=technical_details,
         deadline="This requires a response within 24 hours.",
     )
-=======
-def _format_issue_body(log_event, log_entry):
-    lines = [
-        "A change to a Terraform-managed Okta resource was made outside of "
-        "the provisioning Lambda and the Terraform/CI pipeline.",
-        "",
-        f"- **Event type:** {log_entry['event_type']}",
-        f"- **When:** {log_entry['event_time']}",
-        f"- **Actor:** {log_entry['actor']} ({log_entry['actor_type']})",
-        f"- **Target(s):** {', '.join(log_entry['targets'])}",
-        f"- **Outcome:** {(log_event.get('outcome') or {}).get('result')}",
-        "",
-        "Review whether this should be reverted to match Terraform config, or "
-        "imported into Terraform state instead - see `docs/drift-detection.md` "
-        "for the two options.",
-        "",
-        "<details><summary>Raw Okta System Log event</summary>",
-        "",
-        "```json",
-        json.dumps(log_event, indent=2),
-        "```",
-        "</details>",
-    ]
-    return "\n".join(lines)
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

@@ -182,7 +182,6 @@ Each event's actor gets classified into exactly one bucket:
   The CloudWatch log entry from step 2 *is* the record; there's nothing to
   act on.
 - `manual_review_required` → the Lambda calls the GitHub Issues API and opens
-<<<<<<< HEAD
   an issue titled **"Manual Okta change detected — review required"** -
   and separately posts a Slack alert (`#iam-alerts`, warning severity, via
   `slack_client.py`), so escalations get noticed without anyone having to be
@@ -285,13 +284,6 @@ these issues are also recorded into the same open-escalations list the
 general drift path uses, so `check_unacknowledged_escalations()` (the
 6-hour follow-up loop described above) keeps nagging until someone actually
 closes it.
-=======
-  an issue titled **"Manual Okta change detected — review required"**,
-  containing the event type, timestamp, actor, target(s), outcome, and the
-  raw System Log event for debugging. A human now decides whether to revert
-  the change (bring Okta back to match Terraform) or import it (bring
-  Terraform's config up to match what actually happened).
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
 ### Worked example: the manager reassignment scenario
 
@@ -317,7 +309,6 @@ drift if you don't know the group rules are supposed to do this.
 6. Result: two CloudWatch log entries recording exactly what happened, and
    **no GitHub issue** — this was the system working as designed.
 
-<<<<<<< HEAD
 ### A second "expected" path, easy to conflate with the first
 
 The provisioning Lambda's `OktaClient.assign_to_groups()`
@@ -342,8 +333,6 @@ legitimately produce *two* separate `group.user_membership.add` events in
 the System Log this way (one from each path), both approved, neither
 flagged.
 
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 **Contrast this with an actual incident:** an IT admin, working from a
 support ticket, manually drags Priya into `ops-base` in the Okta console
 directly — but nobody has actually updated her `department` attribute in
@@ -366,7 +355,6 @@ like `terraform/main.tf` says it should. That's still `terraform plan`'s job
 (Type 1, above) and the out-of-band group audit's job (Type 2, above) — this
 Lambda is a faster, identity-aware complement to both, not a replacement for
 either.
-<<<<<<< HEAD
 
 There's a fourth check in this project that's easy to lump in with the above
 but isn't actually more drift detection: `lambda/src/access_review.py`
@@ -376,5 +364,3 @@ built to catch what accumulates quietly over time (a stale transfer, an
 account nobody's touched in months) rather than anything that just changed.
 See `docs/architecture.md`'s "Why access review is a different kind of
 check, not a third drift path" for the full reasoning.
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)

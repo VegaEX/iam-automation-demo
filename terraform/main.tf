@@ -55,7 +55,6 @@ module "okta_policies" {
   admin_group_id = module.okta_groups.group_ids["ops-base"]
 }
 
-<<<<<<< HEAD
 module "okta_admin_roles" {
   source = "./modules/okta_admin_roles"
 
@@ -77,41 +76,24 @@ module "lambda_provisioning" {
   okta_base_url           = var.okta_base_url
   github_token_param_name = var.github_token_param_name
   github_repo             = var.github_repo
-=======
-module "lambda_provisioning" {
-  source = "./modules/lambda_provisioning"
-
-  okta_org_name = var.okta_org_name
-  okta_base_url = var.okta_base_url
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 }
 
 module "api_gateway" {
   source = "./modules/api_gateway"
-<<<<<<< HEAD
   count  = var.enable_aws_resources ? 1 : 0
 
   lambda_function_name = module.lambda_provisioning[0].function_name
   lambda_invoke_arn    = module.lambda_provisioning[0].invoke_arn
-=======
-
-  lambda_function_name = module.lambda_provisioning.function_name
-  lambda_invoke_arn    = module.lambda_provisioning.invoke_arn
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 }
 
 module "okta_drift_auditor" {
   source = "./modules/okta_drift_auditor"
-<<<<<<< HEAD
   count  = var.enable_aws_resources ? 1 : 0
-=======
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 
   okta_org_name              = var.okta_org_name
   okta_base_url              = var.okta_base_url
   github_repo                = var.github_repo
   known_automation_actor_ids = var.known_automation_actor_ids
-<<<<<<< HEAD
   # managed_resource_ids_json intentionally omitted - defaults to "{}".
   # The real value is injected into the Lambda's environment variable
   # out-of-band from `terraform output -json` after each apply, not sourced
@@ -136,7 +118,4 @@ module "cloudwatch_dashboard" {
   provisioning_lambda_function_name  = module.lambda_provisioning[0].function_name
   drift_auditor_lambda_function_name = module.okta_drift_auditor[0].function_name
   access_review_lambda_function_name = var.access_review_function_name
-=======
-  managed_resource_ids_json  = file("${path.module}/../lambda-drift-auditor/managed_resources.json")
->>>>>>> f0e70ef (feat: add drift auditor Lambda, AWS Terraform modules, GitHub Actions drift workflow, updated docs)
 }
