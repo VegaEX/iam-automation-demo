@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 from clients.github_client import GitHubClient
 from clients.google_workspace_client import GoogleWorkspaceClient
 from clients.secret_store import get_secret
+from clients.slack_client import SlackClient
 from clients.ssm_state_store import get_pending_removals, put_pending_removals
+from issue_format import format_human_date, format_issue_body, format_slack_message
 
 logger = logging.getLogger()
 logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
@@ -131,11 +133,8 @@ def _format_automatic_action(action):
     return f"- **{action['app']}**: {statuses}"
 
 
-def _format_issue_body(employee_name, user_email, manager_email, automatic_actions, manual_items, removal_date):
+def _format_technical_details(automatic_actions, manual_items):
     lines = [
-        f"Offboarding automation completed the immediate steps below for "
-        f"**{employee_name}** ({user_email}), manager: {manager_email}.",
-        "",
         "### Automatic actions taken",
         "- Okta account deactivated, sessions cleared, renamed, and moved to `pending_removal`",
     ]
@@ -152,17 +151,35 @@ def _format_issue_body(employee_name, user_email, manager_email, automatic_actio
         lines += [
             f"| {item['app']} | {item['action']} | {item['instructions']} |" for item in manual_items
         ]
-        lines.append("")
 
-    lines += [
-        "### Data review deadline",
-        f"Review and reassign any remaining data/ownership by **{removal_date}**.",
-        "",
-        "### Final removal",
-        f"The Okta account will be permanently deleted on **{removal_date}** by the "
-        "scheduled removal Lambda, if not addressed sooner.",
-    ]
     return "\n".join(lines)
+
+
+def _format_what_needs_to_happen(manual_items):
+    actions = ["Review the automatic actions completed below to confirm they succeeded."]
+    if manual_items:
+        actions.append("Complete each manual item listed below by hand.")
+    actions.append("Reassign or back up any remaining data owned by this person before the deadline below.")
+    actions.append("Close this issue once everything above is done.")
+    return actions
+
+
+def _format_issue_body(employee_name, user_email, manager_email, automatic_actions, manual_items, removal_date):
+    human_date = format_human_date(removal_date)
+    return format_issue_body(
+        what_happened=(
+            f"{employee_name} ({user_email}) has left the company - their manager "
+            f"is {manager_email}. Immediate Okta access has already been removed "
+            "automatically, but some other accounts need manual follow-up."
+        ),
+        what_needs_to_happen=_format_what_needs_to_happen(manual_items),
+        technical_details=_format_technical_details(automatic_actions, manual_items),
+        deadline=(
+            f"Review and reassign any remaining data owned by {user_email} before "
+            f"{human_date}. The Okta account will be permanently deleted on "
+            f"{human_date} by the scheduled removal Lambda, if not addressed sooner."
+        ),
+    )
 
 
 def _open_checklist_issue(employee_name, user_email, manager_email, automatic_actions, manual_items, removal_date):
@@ -187,6 +204,25 @@ def _open_checklist_issue(employee_name, user_email, manager_email, automatic_ac
             }
         )
     )
+
+    slack = SlackClient(webhook_url=get_secret(os.environ["SLACK_WEBHOOK_PARAM_NAME"]))
+    if manual_items:
+        action = (
+            f"Manual steps needed for: {', '.join(item['app'] for item in manual_items)} - "
+            "review the checklist issue."
+        )
+    else:
+        action = "No manual steps needed - review the automatic actions taken."
+    slack.post_alert(
+        channel=os.environ.get("SLACK_ALERTS_CHANNEL", "#iam-alerts"),
+        message=format_slack_message(
+            summary=f"{employee_name} has left - immediate Okta access removed.",
+            action=action,
+            issue_url=issue["html_url"],
+        ),
+        severity="warning",
+    )
+
     return issue
 
 

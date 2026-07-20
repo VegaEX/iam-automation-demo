@@ -48,14 +48,21 @@ def test_missing_required_field_raises_with_field_name():
 def test_unknown_field_is_collected_not_raised_and_reported(monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN_PARAM_NAME", "/iam-automation-demo/github/token")
     monkeypatch.setenv("GITHUB_REPO", "acme-corp/iam-automation-demo")
+    monkeypatch.setenv("SLACK_WEBHOOK_PARAM_NAME", "/iam-demo/slack-webhook")
 
     payload = dict(VALID_PAYLOAD)
     payload["favorite_snack"] = "pretzels"
 
     with patch.object(schema_validator, "GitHubClient") as mock_gh_cls, patch.object(
-        schema_validator, "get_secret", return_value="dummy-secret"
-    ):
+        schema_validator, "SlackClient"
+    ) as mock_slack_cls, patch.object(schema_validator, "get_secret", return_value="dummy-secret"):
         mock_gh = mock_gh_cls.return_value
+        mock_gh.create_issue.return_value = {
+            "number": 1,
+            "html_url": "https://github.com/acme-corp/iam-automation-demo/issues/1",
+        }
+        mock_slack = mock_slack_cls.return_value
+
         validator = SchemaValidator()
         result = validator.validate_and_normalize(payload)
 
@@ -66,6 +73,11 @@ def test_unknown_field_is_collected_not_raised_and_reported(monkeypatch):
         assert "favorite_snack" in kwargs["body"]
         assert "pretzels" in kwargs["body"]
         assert "E12345" in kwargs["body"]
+
+        mock_slack.post_alert.assert_called_once()
+        _, slack_kwargs = mock_slack.post_alert.call_args
+        assert slack_kwargs["severity"] == "warning"
+        assert "favorite_snack" not in slack_kwargs["message"]  # summary is plain-English, not field names
 
 
 def test_em_dash_in_name_field_normalizes_to_hyphen():

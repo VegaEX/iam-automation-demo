@@ -182,14 +182,22 @@ Each event's actor gets classified into exactly one bucket:
   The CloudWatch log entry from step 2 *is* the record; there's nothing to
   act on.
 - `manual_review_required` → the Lambda calls the GitHub Issues API and opens
-  an issue titled **"Manual Okta change detected — review required"**,
-  containing the event type, timestamp, actor, target(s), outcome, and the
-  raw System Log event for debugging - and separately posts a Slack alert
-  (`#iam-alerts`, warning severity, via `slack_client.py`) with the same
-  who/what/when, so escalations get noticed without anyone having to be
+  an issue titled **"Manual Okta change detected — review required"** -
+  and separately posts a Slack alert (`#iam-alerts`, warning severity, via
+  `slack_client.py`), so escalations get noticed without anyone having to be
   watching GitHub. A human now decides whether to revert the change (bring
   Okta back to match Terraform) or import it (bring Terraform's config up
   to match what actually happened).
+
+  Every GitHub issue this project opens - this one included - follows the
+  same structure, built with the shared `issue_format.py` helpers: a plain-
+  English `## What happened` up top (no jargon or IDs), a numbered
+  `## What needs to happen`, then all the technical detail (event type,
+  timestamp, actor, target(s), outcome, raw System Log event) under
+  `## Technical details`, and a `## Deadline` section when the issue is
+  time-sensitive. The matching Slack message leads with a bold plain-English
+  summary line, then the action needed and who should take it, then a link
+  to the GitHub issue - same shape everywhere this project posts an alert.
 
 ### Step 5, six hours later: did anyone actually look?
 
@@ -215,6 +223,67 @@ state via the GitHub API:
 This is the same detect → log → evaluate → resolve/escalate shape as the
 rest of this doc, just running on the *escalation* itself as the thing being
 watched, rather than on the original Okta change.
+
+## Admin privilege grants: a separate, stricter path
+
+Everything above filters events down to changes touching a *Terraform-managed*
+resource ID — that's the whole point of `managed_resources.json`. Admin role
+grants get a deliberately different treatment, because "was this Terraform-managed"
+is the wrong question to ask about a security-sensitive privilege escalation —
+an attacker granting themselves admin doesn't care whether the role happens to
+be one Terraform tracks.
+
+`classifier.py` recognizes two Okta System Log event types as admin-privilege
+events — `user.account.privilege.grant` and `user.mfa.factor.activate` — but
+only when the event's target is shaped like an admin role (an exact match
+against a whitelist of known Okta admin role display names, e.g. "Super
+Administrator", "Application Administrator", combined with a normalized
+`type` check for "AdminRole"). This is deliberately an exact-match whitelist,
+not a substring check — an earlier version matched any target whose display
+name merely *contained* "admin", which misfired on a person literally named
+"Jane Admin" in testing. A target being a *person* named Admin is nothing like
+a target being an *admin role*.
+
+These events are pulled from the same 15-minute System Log window as the rest
+of the auditor's run, but evaluated **without** the `managed_resources.json`
+filter — so a grant of an admin role Terraform has never heard of still gets
+caught:
+
+- Actor is in `KNOWN_AUTOMATION_ACTOR_IDS` → `admin_grant_known_automation`,
+  logged only (e.g. `terraform/modules/okta_admin_roles` applying a
+  Terraform-declared grant).
+- Anyone else → `admin_grant_unknown_actor`, which immediately opens an
+  **"Administrator access granted — immediate review required"** GitHub issue
+  (actor, target, role, timestamp, and the raw System Log event ID) and posts
+  a **red, urgent** Slack alert — no waiting for business hours, unlike the
+  general drift escalation above.
+
+### Catching grants that predate the auditor
+
+The event-based path above only sees grants that happen *after* the auditor
+is deployed and running. It can't retroactively notice a `SUPER_ADMIN` grant
+made last month, before this Lambda ever existed — there's no System Log
+event left in the 15-minute lookback window for something that old.
+
+To close that gap, every run of `handler()` also calls the Okta IAM API
+(`GET /api/v1/iam/assignees/users`, via `okta_role_client.py`) to list
+**every user who currently holds an admin role**, regardless of when or how
+they got it, and compares each holder's email against a configurable
+`KNOWN_ADMIN_EMAILS` allow-list (a comma-separated environment variable).
+Anyone holding admin access who isn't on that list gets the same
+"Administrator access granted" issue and red Slack alert as the event-based
+path.
+
+Since this check re-evaluates the *same* holders on every 15-minute run
+(there's no "event" to naturally prevent reprocessing), it would otherwise
+reopen a duplicate issue every single run for the same still-unresolved
+grant. To prevent that, every email it escalates gets recorded to an
+SSM-stored list (`REPORTED_ADMIN_ALERTS_PARAM_NAME`) and skipped on
+subsequent runs. This doesn't mean the issue goes quiet forever, though —
+these issues are also recorded into the same open-escalations list the
+general drift path uses, so `check_unacknowledged_escalations()` (the
+6-hour follow-up loop described above) keeps nagging until someone actually
+closes it.
 
 ### Worked example: the manager reassignment scenario
 

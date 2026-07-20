@@ -67,10 +67,10 @@ variable "github_repo" {
   type        = string
 }
 
-variable "slack_webhook_url_param_name" {
-  description = "Name of the SSM SecureString parameter holding the Slack incoming webhook URL used for #iam-alerts. Terraform only references the name, never the value - same out-of-band-creation rule as the other secrets. Used by both the main handler (escalation alerts) and the escalation-check function (unacknowledged reminders)."
+variable "slack_webhook_param_name" {
+  description = "Name of the SSM SecureString parameter holding the Slack incoming webhook URL used for #iam-alerts. Terraform only references the name, never the value - same out-of-band-creation rule as the other secrets. Used by both the main handler (escalation alerts) and the escalation-check function (unacknowledged reminders). Same default path as modules/lambda_provisioning's variable of the same name - both point at the same real parameter once deployed."
   type        = string
-  default     = "/iam-demo/slack/webhook-url"
+  default     = "/iam-demo/slack-webhook"
 }
 
 variable "slack_alerts_channel" {
@@ -95,6 +95,18 @@ variable "known_automation_actor_ids" {
   description = "Comma-separated Okta actor IDs (API token IDs) treated as known automation - the provisioning Lambda's token and the Terraform/CI token - so their changes are approved without escalation. These IDs are only knowable once the tokens exist and have been observed acting in the Okta System Log, so this typically starts empty and gets filled in after first deploy."
   type        = string
   default     = ""
+}
+
+variable "known_admin_emails" {
+  description = "Comma-separated emails of users expected to hold an Okta admin role (e.g. those declared via terraform/modules/okta_admin_roles). The periodic admin-role-holder audit escalates anyone holding an admin role whose email isn't in this list - starts empty, so populate it once real admins are known, to avoid flagging your own legitimate admins."
+  type        = string
+  default     = ""
+}
+
+variable "reported_admin_alerts_param_name" {
+  description = "Name of the SSM parameter (plain String, not a secret) storing the list of admin-holder emails already escalated by the periodic audit, so the same unresolved grant doesn't open a duplicate issue on every 15-minute run. Ongoing reminders for an already-open issue come from the escalation-check function instead (open_escalations_param_name)."
+  type        = string
+  default     = "/iam-demo/drift-auditor/reported-admins"
 }
 
 variable "managed_resource_ids_json" {
