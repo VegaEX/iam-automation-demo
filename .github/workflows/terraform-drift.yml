@@ -46,19 +46,25 @@ jobs:
         with:
           script: |
             const body = [
-              "Terraform Cloud workspace `jangus-iam-demo` detected configuration drift " +
-                "during the scheduled 08:00 UTC drift check.",
+              "## What happened",
               "",
-              "This means the real state of the Okta org no longer matches what's declared " +
-                "in the `terraform/` configuration. See `docs/drift-detection.md` for how to " +
-                "resolve it - either import the drifted resource into state or let Terraform " +
-                "recreate/reconcile it on the next apply.",
+              "The Okta configuration has drifted from what Terraform expects. One or " +
+                "more resources in the live Okta org no longer match what is declared in " +
+                "the terraform/ config. This was detected by the scheduled daily drift check.",
               "",
-              "<details><summary>Full plan output</summary>",
+              "## What needs to happen",
               "",
-              "```",
+              "1. Review the plan output below to see exactly what changed.",
+              "2. If the change was intentional, update the Terraform config to match and apply it.",
+              "3. If the change was not intentional, run terraform apply to revert Okta back to the declared state.",
+              "4. Close this issue with a note explaining what happened and how it was resolved.",
+              "",
+              "## Technical details",
+              "",
+              "<details><summary>Show Plan</summary>",
+              "",
               process.env.PLAN_STDOUT,
-              "```",
+              "",
               "</details>",
               "",
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
